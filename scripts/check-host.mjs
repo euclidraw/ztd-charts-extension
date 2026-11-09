@@ -128,6 +128,40 @@ try {
     },
     services: {
       get(name) {
+        if (name === 'canvas.creation') {
+          return {
+            create(request) {
+              if (!request || typeof request.caller !== 'string' || !request.caller.includes(':') || request.caller.trim() !== request.caller) {
+                throw new Error('Entity creation requires a named caller symbol.');
+              }
+              if (!Number.isFinite(request.width) || request.width <= 0 || (request.height !== undefined && (!Number.isFinite(request.height) || request.height <= 0))) {
+                throw new Error('Entity dimensions must be finite positive numbers.');
+              }
+              for (const [aspect] of Object.entries(request.aspects ?? {})) {
+                if (aspect === 'core.transform' || aspect === 'core.bounds') {
+                  throw new Error(`Entity placement aspect is owned by the canvas: ${aspect}`);
+                }
+              }
+              const id = `ent_object_${crypto.randomUUID()}`;
+              world.validateCanonicalSnapshot({ [id]: request.aspects });
+              core.begin_undo_group();
+              try {
+                world.applyCanonicalTransaction(request.caller, [
+                  { id, aspect: 'core.transform', patch: { x: request.x ?? 80, y: request.y ?? 80, rotation: 0 } },
+                  { id, aspect: 'core.bounds', patch: { width: request.width, ...(request.height !== undefined ? { height: request.height } : {}) } },
+                  ...Object.entries(request.aspects).map(([aspect, patch]) => ({ id, aspect, patch })),
+                ]);
+                core.end_undo_group();
+              } catch (error) {
+                core.abort_undo_group();
+                world.replaceCanonicalSnapshot(core.get_canonical_json());
+                throw error;
+              }
+              selected = [id];
+              return id;
+            },
+          };
+        }
         if (name === 'canvas.active-tool-surface') {
           return {
             get: () => ({

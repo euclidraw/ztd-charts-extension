@@ -268,15 +268,18 @@ const plugin = {
   activate(context) {
     const disposers = [];
 
-    const insertChart = (args = {}) => {
+    const insertChart = (rawArgs = {}) => {
+      const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
       const chartType = normalizeChartType(args.chartType ?? 'bar');
       const locale = normalizeLang(args.locale ?? readPreference(context, 'defaultLocale', 'ko'));
       const theme = (args.theme ?? readPreference(context, 'defaultTheme', 'light')) === 'dark' ? 'dark' : 'light';
       const variant = (args.variant ?? readPreference(context, 'defaultVariant', 'card')) === 'bare' ? 'bare' : 'card';
 
       const existingCount = countExistingCharts(context.world);
-      const x = Number.isFinite(args.x) ? args.x : 80 + (existingCount % 4) * 36;
-      const y = Number.isFinite(args.y) ? args.y : 80 + (existingCount % 4) * 36;
+      const hasExplicitX = Number.isFinite(args.x);
+      const hasExplicitY = Number.isFinite(args.y);
+      const x = hasExplicitX ? args.x : 80 + (existingCount % 4) * 36;
+      const y = hasExplicitY ? args.y : 80 + (existingCount % 4) * 36;
       const width = Number.isFinite(args.width) && args.width > 0 ? Math.round(args.width) : DEFAULT_CHART_WIDTH;
       const height = Number.isFinite(args.height) && args.height > 0 ? Math.round(args.height) : DEFAULT_CHART_HEIGHT;
 
@@ -295,9 +298,12 @@ const plugin = {
       const creation = context?.services?.get?.('canvas.creation');
       if (creation && typeof creation.create === 'function') {
         return creation.create({
+          caller: `${EXTENSION_ID}:insert-chart`,
+          ...(hasExplicitX ? { x } : {}),
+          ...(hasExplicitY ? { y } : {}),
+          width,
+          height,
           aspects: {
-            'core.transform': { x, y, rotation: 0 },
-            'core.bounds': { width, height },
             [CHART_ASPECT_ID]: chartProps,
           },
         });
@@ -315,7 +321,8 @@ const plugin = {
       return id;
     };
 
-    const setChartType = (args = {}) => {
+    const setChartType = (rawArgs = {}) => {
+      const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
       const targetIds = getSelectedChartIds(context, args.entityId);
       if (targetIds.length === 0) return null;
       const nextType = normalizeChartType(args.chartType);
@@ -343,7 +350,8 @@ const plugin = {
       return targetIds;
     };
 
-    const updateData = (args = {}) => {
+    const updateData = (rawArgs = {}) => {
+      const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
       const targetIds = getSelectedChartIds(context, args.entityId);
       if (targetIds.length === 0) return null;
       const parsed = parseDataInput(args.rows ?? args.data ?? '');
@@ -380,7 +388,8 @@ const plugin = {
       return targetIds;
     };
 
-    const resetSampleData = (args = {}) => {
+    const resetSampleData = (rawArgs = {}) => {
+      const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
       const targetIds = getSelectedChartIds(context, args.entityId);
       if (targetIds.length === 0) return null;
       const ops = [];
@@ -409,7 +418,8 @@ const plugin = {
       return targetIds;
     };
 
-    const applyTopSuggestion = (args = {}) => {
+    const applyTopSuggestion = (rawArgs = {}) => {
+      const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
       const targetIds = getSelectedChartIds(context, args.entityId);
       if (targetIds.length === 0) return null;
       const ops = [];
@@ -438,7 +448,8 @@ const plugin = {
       return targetIds;
     };
 
-    const toggleField = (field, values, args = {}) => {
+    const toggleField = (field, values, rawArgs = {}) => {
+      const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
       const targetIds = getSelectedChartIds(context, args.entityId);
       if (targetIds.length === 0) return null;
       const ops = [];
@@ -457,7 +468,8 @@ const plugin = {
       return targetIds;
     };
 
-    const runCommand = (name, args = {}) => {
+    const runCommand = (name, rawArgs = {}) => {
+      const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
       switch (name) {
         case 'insert-chart':
           return insertChart(args);

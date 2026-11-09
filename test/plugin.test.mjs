@@ -178,3 +178,49 @@ test('plugin commands create, switch type, update data, apply suggestions, and t
   runtime.dispose();
   assert.equal(registeredCommands.size, 0);
 });
+
+test('insertChart honors the Alid host canvas.creation service contract (named caller symbol, top-level dimensions, no placement aspects)', () => {
+  const world = createMockWorld();
+  let lastRequest = null;
+  const runtime = plugin.activate({
+    world,
+    commands: { register: () => () => {} },
+    services: {
+      get(name) {
+        if (name === 'canvas.creation') {
+          return {
+            create(request) {
+              if (!request || typeof request.caller !== 'string' || !request.caller.includes(':') || request.caller.trim() !== request.caller) {
+                throw new Error('Entity creation requires a named caller symbol.');
+              }
+              if (!Number.isFinite(request.width) || request.width <= 0 || (request.height !== undefined && (!Number.isFinite(request.height) || request.height <= 0))) {
+                throw new Error('Entity dimensions must be finite positive numbers.');
+              }
+              for (const aspect of Object.keys(request.aspects ?? {})) {
+                if (aspect === 'core.transform' || aspect === 'core.bounds') {
+                  throw new Error(`Entity placement aspect is owned by the canvas: ${aspect}`);
+                }
+              }
+              lastRequest = request;
+              return 'ent_object_test';
+            },
+          };
+        }
+        return undefined;
+      },
+    },
+  });
+
+  const createdId = runtime.api.run('insert-chart', { chartType: 'pie' });
+  assert.equal(createdId, 'ent_object_test');
+  assert.equal(lastRequest.caller, `${EXTENSION_ID}:insert-chart`);
+  assert.equal(lastRequest.width, 480);
+  assert.equal(lastRequest.height, 340);
+  assert.equal('x' in lastRequest, false, 'omits x so host centers in visible area');
+  assert.equal('y' in lastRequest, false, 'omits y so host centers in visible area');
+  assert.deepEqual(Object.keys(lastRequest.aspects), [CHART_ASPECT_ID]);
+  assert.equal(lastRequest.aspects[CHART_ASPECT_ID].chartType, 'pie');
+
+  runtime.dispose();
+});
+
