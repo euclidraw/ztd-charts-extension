@@ -198,9 +198,26 @@ export const ztdChartAspect = Object.freeze({
         id: 'ztd-charts.accent.inspector',
         kind: 'color',
         field: 'accentColor',
-        label: '강조 색상',
-        section: '스타일 및 표시',
+        label: '강조색',
+        section: '강조 및 색상',
         placement: 'inspector',
+      },
+      {
+        id: 'ztd-charts.accent.swatches',
+        kind: 'segmented',
+        field: 'accentColor',
+        label: '강조 팔레트',
+        section: '강조 및 색상',
+        placement: 'inspector',
+        options: [
+          { label: '파랑', value: '#3182f6', swatch: '#3182f6' },
+          { label: '초록', value: '#10b981', swatch: '#10b981' },
+          { label: '주황', value: '#f59e0b', swatch: '#f59e0b' },
+          { label: '빨강', value: '#ef4444', swatch: '#ef4444' },
+          { label: '보라', value: '#8b5cf6', swatch: '#8b5cf6' },
+          { label: '분홍', value: '#ec4899', swatch: '#ec4899' },
+          { label: '청록', value: '#06b6d4', swatch: '#06b6d4' },
+        ],
       },
       {
         id: 'ztd-charts.radius.inspector',
@@ -218,8 +235,34 @@ export const ztdChartAspect = Object.freeze({
         kind: 'color',
         field: 'backgroundColor',
         label: '배경 색상',
-        section: '스타일 및 표시',
+        section: '강조 및 색상',
         placement: 'inspector',
+      },
+      {
+        id: 'ztd-charts.background.swatches',
+        kind: 'segmented',
+        field: 'backgroundColor',
+        label: '배경 팔레트',
+        section: '강조 및 색상',
+        placement: 'inspector',
+        options: [
+          { label: '슬레이트', value: '#f8fafc', swatch: '#f8fafc' },
+          { label: '웜아이보리', value: '#fffbeb', swatch: '#fffbeb' },
+          { label: '민트틴트', value: '#f0fdf4', swatch: '#f0fdf4' },
+          { label: '블루틴트', value: '#eff6ff', swatch: '#eff6ff' },
+          { label: '다크네이비', value: '#0f172a', swatch: '#0f172a' },
+          { label: '차콜블랙', value: '#18181b', swatch: '#18181b' },
+          { label: '딥인디고', value: '#1e1b4b', swatch: '#1e1b4b' },
+        ],
+      },
+      {
+        id: 'ztd-charts.highlight.inspector',
+        kind: 'segmented',
+        field: 'highlightMode',
+        label: '강조 규칙',
+        section: '강조 및 색상',
+        placement: 'inspector',
+        options: HIGHLIGHT_PRESETS.map(preset => ({ label: preset.labelKo, value: preset.id })),
       },
       {
         id: 'ztd-charts.suggest.inspector',
@@ -450,6 +493,7 @@ const plugin = {
         const current = context.world.getCanonical(id, CHART_ASPECT_ID);
         if (!current) continue;
         const nextOptions = { ...(current.options ?? {}) };
+        const patch = {};
         let optionsChanged = false;
 
         if (args.options && typeof args.options === 'object' && !Array.isArray(args.options)) {
@@ -462,11 +506,24 @@ const plugin = {
           }
           optionsChanged = true;
         }
+        if ('highlightMode' in args) {
+          const mode = HIGHLIGHT_PRESETS.some(preset => preset.id === args.highlightMode)
+            ? args.highlightMode
+            : 'auto';
+          patch.highlightMode = mode;
+          if (mode === 'auto') delete nextOptions.highlight;
+          else nextOptions.highlight = mode;
+          optionsChanged = true;
+        }
         if ('highlight' in args) {
           if (args.highlight === undefined || args.highlight === null || args.highlight === 'auto') {
             delete nextOptions.highlight;
+            patch.highlightMode = 'auto';
           } else {
             nextOptions.highlight = args.highlight;
+            const preset = typeof args.highlight === 'string'
+              && HIGHLIGHT_PRESETS.some(item => item.id === args.highlight);
+            patch.highlightMode = preset ? args.highlight : 'auto';
           }
           optionsChanged = true;
         }
@@ -503,7 +560,6 @@ const plugin = {
           optionsChanged = true;
         }
 
-        const patch = {};
         if (typeof args.theme === 'string' && (args.theme === 'light' || args.theme === 'dark')) {
           patch.theme = args.theme;
         }

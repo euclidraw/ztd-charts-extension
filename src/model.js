@@ -52,6 +52,7 @@ export const CHART_DEFAULTS = Object.freeze({
   legendMode: 'auto',
   accentColor: '#3182f6',
   backgroundColor: '',
+  highlightMode: 'auto',
   cornerRadius: 0,
   data: [],
   encoding: {},
@@ -783,6 +784,10 @@ export function resolveChartSpec(rawProps = {}) {
   const customRows = cloneJsonRows(rawProps.data);
   const customEncoding = isPlainRecord(rawProps.encoding) ? { ...rawProps.encoding } : {};
   const customOptions = isPlainRecord(rawProps.options) ? { ...rawProps.options } : {};
+  const highlightMode = HIGHLIGHT_PRESETS.some(preset => preset.id === rawProps.highlightMode)
+    ? rawProps.highlightMode
+    : 'auto';
+  if (highlightMode !== 'auto') customOptions.highlight = highlightMode;
   const textOverrides = isPlainRecord(customOptions.textOverrides) ? { ...customOptions.textOverrides } : {};
   const itemColors = sanitizeItemColors(customOptions.itemColors);
 
@@ -962,6 +967,7 @@ export function resolveChartSpec(rawProps = {}) {
     backgroundColor,
     cornerRadius,
     neutralColor,
+    highlightMode,
     highlight: customOptions.highlight ?? 'auto',
     itemColors,
     dataTargets,

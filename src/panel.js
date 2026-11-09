@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client';
 import { CHART_ASPECT_ID, EXTENSION_ID, STUDIO_PANEL_ID } from './manifest.js';
 import {
   CHART_FAMILIES,
-  HIGHLIGHT_PRESETS,
   formatRowsAsCsv,
   getChartCatalog,
   isValidHexColor,
@@ -13,27 +12,6 @@ import {
 } from './model.js';
 
 export const COLOR_INSPECTOR_PANEL_ID = `${EXTENSION_ID}.color-inspector`;
-
-const ACCENT_PRESETS = Object.freeze([
-  '#3182f6',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#ec4899',
-  '#06b6d4',
-]);
-
-const BG_PRESETS = Object.freeze([
-  { label: '화이트', value: '#ffffff' },
-  { label: '슬레이트', value: '#f8fafc' },
-  { label: '웜아이보리', value: '#fffbeb' },
-  { label: '민트틴트', value: '#f0fdf4' },
-  { label: '블루틴트', value: '#eff6ff' },
-  { label: '다크네이비', value: '#0f172a' },
-  { label: '차콜블랙', value: '#18181b' },
-  { label: '딥인디고', value: '#1e1b4b' },
-]);
 
 const COMPONENT_PALETTE = Object.freeze([
   '#3182f6',
@@ -97,21 +75,6 @@ function textButton(label, onClick, pressed) {
   );
 }
 
-function swatchButton(hex, label, pressed, onClick) {
-  return React.createElement(
-    'button',
-    {
-      type: 'button',
-      className: 'wb-swatch',
-      'aria-label': label,
-      'aria-pressed': pressed ? 'true' : 'false',
-      title: label,
-      onClick,
-    },
-    React.createElement('span', { style: { background: hex } }),
-  );
-}
-
 function colorInput(label, value, fallback, onChange) {
   return React.createElement('input', {
     type: 'color',
@@ -132,7 +95,7 @@ export function ChartColorAndHighlightControls({ selected, resolved, context }) 
   };
 
   const rawHighlight = resolved.highlight;
-  const presetIds = HIGHLIGHT_PRESETS.map(p => p.id);
+  const presetIds = ['auto', 'max', 'min', 'first', 'last', 'none'];
   const activePreset =
     rawHighlight === undefined || rawHighlight === null || rawHighlight === 'auto'
       ? 'auto'
@@ -177,105 +140,32 @@ export function ChartColorAndHighlightControls({ selected, resolved, context }) 
   const panelFallback = resolved.resolvedTheme?.panel || '#ffffff';
   const accentFallback = resolved.resolvedTheme?.accent || '#3182f6';
   const neutralFallback = resolved.resolvedTheme?.neutral || '#cbd5e1';
+  const showItems = dataItems.length > 0 && resolved.dataTargets?.kind !== 'updown';
+  if (!showItems && dataItems.length === 0) return null;
 
   return React.createElement(
     'div',
     { className: 'wb-controls' },
-    React.createElement(
-      'fieldset',
-      { className: 'wb-control-group' },
-      React.createElement('legend', null, '배경'),
-      controlRow(
-        '배경 색상',
-        React.createElement(
-          React.Fragment,
-          null,
-          resolved.backgroundColor !== 'transparent'
-            ? colorInput('배경 색상', resolved.backgroundColor, panelFallback, value => dispatchStyleUpdate({ backgroundColor: value }))
-            : null,
-          textButton('투명', () => dispatchStyleUpdate({ backgroundColor: 'transparent' }), resolved.backgroundColor === 'transparent'),
-          resolved.backgroundColor
-            ? textButton('기본값', () => dispatchStyleUpdate({ backgroundColor: '' }))
-            : null,
-        ),
-      ),
-      controlRow(
-        '배경 팔레트',
-        React.createElement(
-          'div',
-          { className: 'wb-segmented', role: 'group', 'aria-label': '배경 팔레트' },
-          ...BG_PRESETS.map(preset => swatchButton(
-            preset.value,
-            `${preset.label} (${preset.value})`,
-            resolved.backgroundColor?.toLowerCase() === preset.value.toLowerCase(),
-            () => dispatchStyleUpdate({ backgroundColor: preset.value }),
-          )),
-        ),
-        { wrap: true },
+    controlRow(
+      '배경',
+      React.createElement(
+        React.Fragment,
+        null,
+        resolved.backgroundColor !== 'transparent'
+          ? colorInput('배경 색상', resolved.backgroundColor, panelFallback, value => dispatchStyleUpdate({ backgroundColor: value }))
+          : null,
+        textButton('투명', () => dispatchStyleUpdate({ backgroundColor: 'transparent' }), resolved.backgroundColor === 'transparent'),
+        resolved.backgroundColor
+          ? textButton('기본값', () => dispatchStyleUpdate({ backgroundColor: '' }))
+          : null,
       ),
     ),
-    React.createElement(
-      'fieldset',
-      { className: 'wb-control-group' },
-      React.createElement('legend', null, '색상'),
-      controlRow(
-        '강조색',
-        colorInput('강조 색상', resolved.accentColor, accentFallback, value => dispatchStyleUpdate({ accentColor: value })),
-      ),
-      controlRow(
-        '강조 팔레트',
-        React.createElement(
-          'div',
-          { className: 'wb-segmented', role: 'group', 'aria-label': '강조 팔레트' },
-          ...ACCENT_PRESETS.map(hex => swatchButton(
-            hex,
-            `강조색 ${hex}`,
-            resolved.accentColor?.toLowerCase() === hex.toLowerCase(),
-            () => dispatchStyleUpdate({ accentColor: hex }),
-          )),
-        ),
-        { wrap: true },
-      ),
-      controlRow(
-        '기본 데이터색',
-        React.createElement(
-          React.Fragment,
-          null,
-          colorInput('비강조 기본 데이터 색상', resolved.neutralColor, neutralFallback, value => dispatchStyleUpdate({ neutralColor: value })),
-          resolved.neutralColor
-            ? textButton('초기화', () => dispatchStyleUpdate({ neutralColor: '' }))
-            : null,
-        ),
-      ),
-    ),
-    React.createElement(
-      'fieldset',
-      { className: 'wb-control-group' },
-      React.createElement('legend', null, '강조 데이터'),
-      controlRow(
-        '강조 규칙',
-        React.createElement(
-          'div',
-          { className: 'wb-segmented', role: 'group', 'aria-label': '강조 데이터 지정' },
-          ...HIGHLIGHT_PRESETS.map(preset => React.createElement(
-            'button',
-            {
-              key: preset.id,
-              type: 'button',
-              'aria-pressed': activePreset === preset.id ? 'true' : 'false',
-              onClick: () => dispatchStyleUpdate({ highlight: preset.id }),
-            },
-            preset.labelKo,
-          )),
-        ),
-        { wrap: true },
-      ),
-      activePreset === 'custom'
-        ? controlRow('직접 선택', textButton('자동으로', () => dispatchStyleUpdate({ highlight: 'auto' })))
-        : null,
-      dataItems.length > 0 && resolved.dataTargets?.kind !== 'updown'
-        ? controlRow(
-          '항목',
+    showItems
+      ? React.createElement(
+        React.Fragment,
+        null,
+        controlRow(
+          '강조 항목',
           React.createElement(
             'div',
             { className: 'wb-segmented', role: 'group', 'aria-label': '특정 데이터 항목 강조' },
@@ -291,14 +181,27 @@ export function ChartColorAndHighlightControls({ selected, resolved, context }) 
             )),
           ),
           { wrap: true },
-        )
-        : null,
-    ),
+        ),
+        activePreset === 'custom'
+          ? controlRow('직접 선택', textButton('자동으로', () => dispatchStyleUpdate({ highlight: 'auto', highlightMode: 'auto' })))
+          : null,
+      )
+      : null,
     dataItems.length > 0
       ? React.createElement(
-        'fieldset',
-        { className: 'wb-control-group' },
-        React.createElement('legend', null, '세부 데이터 색상'),
+        React.Fragment,
+        null,
+        controlRow(
+          '기본 데이터색',
+          React.createElement(
+            React.Fragment,
+            null,
+            colorInput('비강조 기본 데이터 색상', resolved.neutralColor, neutralFallback, value => dispatchStyleUpdate({ neutralColor: value })),
+            resolved.neutralColor
+              ? textButton('초기화', () => dispatchStyleUpdate({ neutralColor: '' }))
+              : null,
+          ),
+        ),
         controlRow(
           '일괄',
           React.createElement(
