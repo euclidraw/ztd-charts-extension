@@ -4,7 +4,7 @@ import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 var extension_default = {
 	id: "diagram.ztd-charts",
 	title: "ZTD 차트",
-	version: "0.1.0",
+	version: "0.1.1",
 	summary: "36종의 zero-dependency 통계·비즈니스 차트를 캔버스 도형, 정적 SVG, 데이터 스튜디오 패널 및 코파일럿 도구로 제공하는 확장",
 	engine: "^0.1.1",
 	dependencies: {},
