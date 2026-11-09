@@ -202,6 +202,17 @@ export const ztdChartAspect = Object.freeze({
         placement: 'inspector',
       },
       {
+        id: 'ztd-charts.radius.inspector',
+        kind: 'number',
+        field: 'cornerRadius',
+        label: '모서리 둥글기',
+        section: '스타일 및 표시',
+        placement: 'inspector',
+        min: 0,
+        max: 64,
+        step: 1,
+      },
+      {
         id: 'ztd-charts.background.inspector',
         kind: 'color',
         field: 'backgroundColor',

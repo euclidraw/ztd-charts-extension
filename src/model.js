@@ -52,6 +52,7 @@ export const CHART_DEFAULTS = Object.freeze({
   legendMode: 'auto',
   accentColor: '#3182f6',
   backgroundColor: '',
+  cornerRadius: 0,
   data: [],
   encoding: {},
   options: {},
@@ -68,6 +69,13 @@ export const HIGHLIGHT_PRESETS = Object.freeze([
 
 export function isValidHexColor(value) {
   return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim());
+}
+
+/** Card corner radius in pixels. Square by default; capped so a card cannot become a circle. */
+export function resolveCornerRadius(value) {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(64, Math.round(n));
 }
 
 const CATALOG_CACHE = {
@@ -779,7 +787,11 @@ export function resolveChartSpec(rawProps = {}) {
     ? customOptions.neutralColor.trim()
     : '';
 
-  const resolvedTheme = resolveChartTheme(themeName, accentColor, backgroundColor, neutralColor);
+  const cornerRadius = resolveCornerRadius(rawProps.cornerRadius);
+  const resolvedTheme = {
+    ...resolveChartTheme(themeName, accentColor, backgroundColor, neutralColor),
+    radius: cornerRadius,
+  };
 
   let effectiveRows = example.data;
   let effectiveEncoding = { ...(example.encoding ?? {}) };
@@ -842,7 +854,7 @@ export function resolveChartSpec(rawProps = {}) {
       ? dataTargets[0].customColor
       : '';
   const finalTheme = singleTargetCustomColor
-    ? resolveChartTheme(themeName, singleTargetCustomColor, backgroundColor, neutralColor)
+    ? { ...resolveChartTheme(themeName, singleTargetCustomColor, backgroundColor, neutralColor), radius: cornerRadius }
     : resolvedTheme;
 
   const title = textOverrides['field:title'] !== undefined
@@ -940,6 +952,7 @@ export function resolveChartSpec(rawProps = {}) {
     themeName,
     accentColor,
     backgroundColor,
+    cornerRadius,
     neutralColor,
     highlight: customOptions.highlight ?? 'auto',
     itemColors,

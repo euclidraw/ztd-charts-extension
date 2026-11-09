@@ -14,6 +14,7 @@ import {
   normalizeLang,
   parseDataInput,
   resolveChartSpec,
+  resolveCornerRadius,
   sanitizeItemColors,
   suggestChartsForRows,
 } from './model.js';
@@ -85,6 +86,13 @@ function sanitizePatch(rawPatch, existingProps = CHART_DEFAULTS) {
     } else {
       clean.backgroundColor = rawPatch.backgroundColor.trim();
     }
+  }
+  if (rawPatch.cornerRadius !== undefined) {
+    const radius = Number(rawPatch.cornerRadius);
+    if (!Number.isFinite(radius) || radius < 0 || radius > 64) {
+      throw new Error('INVALID_INPUT: cornerRadius must be a number from 0 to 64');
+    }
+    clean.cornerRadius = resolveCornerRadius(radius);
   }
   if (rawPatch.data !== undefined) {
     if (typeof rawPatch.data === 'string') {
@@ -314,6 +322,7 @@ export function registerZtdChartTools(context) {
             legendMode: `Allowed: ${ALLOWED_LEGENDS.join(', ')}`,
             accentColor: 'string (#rrggbb): 강조 계열 색상',
             backgroundColor: 'string (#rrggbb or ""): 차트 카드 배경 색상',
+            cornerRadius: 'number (0–64): 차트 카드 모서리 둥글기. 0이면 직각',
             data: 'array of row objects (비워 두면 해당 차트 유형의 내장 샘플 데이터 사용)',
             encoding: 'object: 데이터 컬럼 매핑 (예: { x, y, series } 또는 { label, value })',
             options:

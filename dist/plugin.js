@@ -4,7 +4,7 @@ import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 var extension_default = {
 	id: "diagram.ztd-charts",
 	title: "ZTD 차트",
-	version: "0.1.4",
+	version: "0.1.5",
 	summary: "36종의 zero-dependency 통계·비즈니스 차트를 캔버스 도형, 정적 SVG, 데이터 스튜디오 패널 및 코파일럿 도구로 제공하는 확장",
 	engine: "^0.1.1",
 	dependencies: {},
@@ -22859,6 +22859,7 @@ var CHART_DEFAULTS = Object.freeze({
 	legendMode: "auto",
 	accentColor: "#3182f6",
 	backgroundColor: "",
+	cornerRadius: 0,
 	data: [],
 	encoding: {},
 	options: {}
@@ -22903,6 +22904,12 @@ var HIGHLIGHT_PRESETS = Object.freeze([
 ]);
 function isValidHexColor(value) {
 	return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value.trim());
+}
+/** Card corner radius in pixels. Square by default; capped so a card cannot become a circle. */
+function resolveCornerRadius(value) {
+	const n = typeof value === "number" ? value : Number(value);
+	if (!Number.isFinite(n) || n <= 0) return 0;
+	return Math.min(64, Math.round(n));
 }
 var CATALOG_CACHE = {
 	ko: Object.freeze(chartsIn("ko").map((def) => {
@@ -23511,7 +23518,11 @@ function resolveChartSpec(rawProps = {}) {
 	const itemColors = sanitizeItemColors(customOptions.itemColors);
 	const backgroundColor = isValidHexColor(rawProps.backgroundColor) ? rawProps.backgroundColor.trim() : isValidHexColor(customOptions.backgroundColor) ? customOptions.backgroundColor.trim() : "";
 	const neutralColor = isValidHexColor(customOptions.neutralColor) ? customOptions.neutralColor.trim() : "";
-	const resolvedTheme = resolveChartTheme(themeName, accentColor, backgroundColor, neutralColor);
+	const cornerRadius = resolveCornerRadius(rawProps.cornerRadius);
+	const resolvedTheme = {
+		...resolveChartTheme(themeName, accentColor, backgroundColor, neutralColor),
+		radius: cornerRadius
+	};
 	let effectiveRows = example.data;
 	let effectiveEncoding = { ...example.encoding ?? {} };
 	let effectiveOptions = {
@@ -23554,7 +23565,10 @@ function resolveChartSpec(rawProps = {}) {
 	}
 	const dataTargets = extractChartDataTargets(chartType, effectiveRows, effectiveEncoding, effectiveOptions, resolvedTheme, localeTag);
 	const singleTargetCustomColor = (chartType === "gauge" || chartType === "sparkline") && dataTargets[0]?.customColor ? dataTargets[0].customColor : "";
-	const finalTheme = singleTargetCustomColor ? resolveChartTheme(themeName, singleTargetCustomColor, backgroundColor, neutralColor) : resolvedTheme;
+	const finalTheme = singleTargetCustomColor ? {
+		...resolveChartTheme(themeName, singleTargetCustomColor, backgroundColor, neutralColor),
+		radius: cornerRadius
+	} : resolvedTheme;
 	const title = textOverrides["field:title"] !== void 0 ? String(textOverrides["field:title"]) : typeof rawProps.title === "string" && rawProps.title.length > 0 ? rawProps.title : example.card?.title ?? def.name ?? chartType;
 	const subtitle = textOverrides["field:subtitle"] !== void 0 ? String(textOverrides["field:subtitle"]) : typeof rawProps.subtitle === "string" && rawProps.subtitle.length > 0 ? rawProps.subtitle : example.card?.subtitle ?? "";
 	const takeaway = textOverrides["field:takeaway"] !== void 0 ? String(textOverrides["field:takeaway"]) : typeof rawProps.takeaway === "string" ? rawProps.takeaway : "";
@@ -23607,6 +23621,7 @@ function resolveChartSpec(rawProps = {}) {
 		themeName,
 		accentColor,
 		backgroundColor,
+		cornerRadius,
 		neutralColor,
 		highlight: customOptions.highlight ?? "auto",
 		itemColors,
@@ -24031,7 +24046,7 @@ function renderChartSvg(props, derived, entityId = "chart") {
 	const y = Number.isFinite(geom.y) ? geom.y : 0;
 	const rotationDeg = Number.isFinite(geom.rotation) ? geom.rotation * 180 / Math.PI : 0;
 	const resolved = resolveChartSpec(props);
-	const { bareSpec, resolvedTheme, localeTag, variant, title, subtitle, takeaway, textOverrides, legendItems } = resolved;
+	const { bareSpec, resolvedTheme, localeTag, variant, title, subtitle, takeaway, textOverrides, legendItems, cornerRadius } = resolved;
 	const padX = variant === "card" ? 20 : 12;
 	const padTop = variant === "card" ? 18 : 12;
 	const padBottom = variant === "card" ? 16 : 12;
@@ -24082,7 +24097,7 @@ function renderChartSvg(props, derived, entityId = "chart") {
 		footerSvg = `<line x1="${padX}" y1="${lineY}" x2="${width - padX}" y2="${lineY}" stroke="${escapeXml(resolvedTheme.line)}" stroke-width="1"/><text data-chart-field="takeaway" x="${padX}" y="${textY}" font-size="11.5" font-weight="600" fill="${escapeXml(resolvedTheme.accentText)}">${escapeXml(takeaway)}</text>`;
 	}
 	const fontFamily = escapeXml(resolvedTheme.fontFamily || "Pretendard, -apple-system, BlinkMacSystemFont, sans-serif");
-	return { svg: `<g transform="${transformAttr}" data-chart-type="${escapeXml(resolved.chartType)}" font-family="${fontFamily}"><defs><clipPath id="${clipId}"><rect width="${width}" height="${height}" rx="14"/></clipPath></defs><g clip-path="url(#${clipId})"><rect width="${width}" height="${height}" rx="14" fill="${escapeXml(resolvedTheme.panel)}" stroke="${escapeXml(resolvedTheme.line)}" stroke-width="1"/>` + headerSvg + `<svg x="${plotX}" y="${plotY}" width="${plotWidth}" height="${plotHeight}" viewBox="${escapeXml(viewBox)}" preserveAspectRatio="xMidYMid meet">` + innerPlotSvg + `</svg>` + footerSvg + "</g></g>" };
+	return { svg: `<g transform="${transformAttr}" data-chart-type="${escapeXml(resolved.chartType)}" font-family="${fontFamily}"><defs><clipPath id="${clipId}"><rect width="${width}" height="${height}" rx="${cornerRadius}"/></clipPath></defs><g clip-path="url(#${clipId})"><rect width="${width}" height="${height}" rx="${cornerRadius}" fill="${escapeXml(resolvedTheme.panel)}" stroke="${escapeXml(resolvedTheme.line)}" stroke-width="1"/>` + headerSvg + `<svg x="${plotX}" y="${plotY}" width="${plotWidth}" height="${plotHeight}" viewBox="${escapeXml(viewBox)}" preserveAspectRatio="xMidYMid meet">` + innerPlotSvg + `</svg>` + footerSvg + "</g></g>" };
 }
 // src/dom-renderer.js
 var mountedRoots = /* @__PURE__ */ new WeakMap();
@@ -24320,7 +24335,7 @@ function renderChartDom(hostEl, props, derived, entityId = "chart") {
 		hostEl.dataset.chartBackground = resolved.backgroundColor || "";
 	}
 	const themeVars = themeToCss(resolvedTheme);
-	if (hostEl.style) hostEl.style.cssText = `${themeVars};width:100%;height:${height}px;box-sizing:border-box;position:relative;overflow:hidden;border-radius:14px;background:${resolvedTheme.panel};border:1px solid ${resolvedTheme.line};color:${resolvedTheme.ink};font-family:${resolvedTheme.fontFamily};user-select:none;`;
+	if (hostEl.style) hostEl.style.cssText = `${themeVars};width:100%;height:${height}px;box-sizing:border-box;position:relative;overflow:hidden;border-radius:${resolved.cornerRadius}px;background:${resolvedTheme.panel};border:1px solid ${resolvedTheme.line};color:${resolvedTheme.ink};font-family:${resolvedTheme.fontFamily};user-select:none;`;
 	const doc = hostEl.ownerDocument;
 	if (!doc || typeof doc.createElement !== "function") {
 		const { svg } = renderChartSvg(props, {
@@ -26480,6 +26495,11 @@ function sanitizePatch(rawPatch, existingProps = CHART_DEFAULTS) {
 		else if (!isValidHexColor(rawPatch.backgroundColor)) throw new Error("INVALID_INPUT: backgroundColor must be \"\" or a #rrggbb hex string");
 		else clean.backgroundColor = rawPatch.backgroundColor.trim();
 	}
+	if (rawPatch.cornerRadius !== void 0) {
+		const radius = Number(rawPatch.cornerRadius);
+		if (!Number.isFinite(radius) || radius < 0 || radius > 64) throw new Error("INVALID_INPUT: cornerRadius must be a number from 0 to 64");
+		clean.cornerRadius = resolveCornerRadius(radius);
+	}
 	if (rawPatch.data !== void 0) {
 		if (typeof rawPatch.data === "string") {
 			const parsed = parseDataInput(rawPatch.data, clean.locale ?? existingProps.locale ?? "ko");
@@ -26691,6 +26711,7 @@ function registerZtdChartTools(context) {
 				legendMode: `Allowed: ${ALLOWED_LEGENDS.join(", ")}`,
 				accentColor: "string (#rrggbb): 강조 계열 색상",
 				backgroundColor: "string (#rrggbb or \"\"): 차트 카드 배경 색상",
+				cornerRadius: "number (0–64): 차트 카드 모서리 둥글기. 0이면 직각",
 				data: "array of row objects (비워 두면 해당 차트 유형의 내장 샘플 데이터 사용)",
 				encoding: "object: 데이터 컬럼 매핑 (예: { x, y, series } 또는 { label, value })",
 				options: "object: 차트별 세부 옵션 (highlight: \"auto\"|\"max\"|\"min\"|\"first\"|\"last\"|\"none\"|string|string[], neutralColor: \"#rrggbb\", itemColors: { [label]: \"#rrggbb\" } 등)"
@@ -26975,6 +26996,17 @@ var ztdChartAspect = Object.freeze({
 				label: "강조 색상",
 				section: "스타일 및 표시",
 				placement: "inspector"
+			},
+			{
+				id: "ztd-charts.radius.inspector",
+				kind: "number",
+				field: "cornerRadius",
+				label: "모서리 둥글기",
+				section: "스타일 및 표시",
+				placement: "inspector",
+				min: 0,
+				max: 64,
+				step: 1
 			},
 			{
 				id: "ztd-charts.background.inspector",

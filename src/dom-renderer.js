@@ -338,7 +338,7 @@ export function renderChartDom(hostEl, props, derived, entityId = 'chart') {
   if (hostEl.style) {
     hostEl.style.cssText =
       `${themeVars};width:100%;height:${height}px;box-sizing:border-box;position:relative;overflow:hidden;` +
-      `border-radius:14px;background:${resolvedTheme.panel};border:1px solid ${resolvedTheme.line};` +
+      `border-radius:${resolved.cornerRadius}px;background:${resolvedTheme.panel};border:1px solid ${resolvedTheme.line};` +
       `color:${resolvedTheme.ink};font-family:${resolvedTheme.fontFamily};user-select:none;`;
   }
 

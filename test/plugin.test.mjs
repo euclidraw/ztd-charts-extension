@@ -549,6 +549,30 @@ test('card chrome keeps only the title and subtitle unless the user sets the res
   assert.equal(kept.cardLevel, '심화');
 });
 
+test('chart cards are square by default and cornerRadius is a stored property', () => {
+  const resolved = resolveChartSpec({ chartType: 'bar' });
+  assert.equal(resolved.cornerRadius, 0);
+  assert.equal(resolved.resolvedTheme.radius, 0);
+  const { svg } = renderChartSvg({ chartType: 'bar' }, undefined, 'square-card');
+  assert.ok(svg.includes('rx="0"'));
+  assert.equal(svg.includes('rx="14"'), false);
+
+  const rounded = resolveChartSpec({ chartType: 'bar', cornerRadius: 12 });
+  assert.equal(rounded.cornerRadius, 12);
+  const { svg: roundedSvg } = renderChartSvg({ chartType: 'bar', cornerRadius: 12 }, undefined, 'round-card');
+  assert.ok(roundedSvg.includes('rx="12"'));
+
+  const world = createMockWorld();
+  const planned = planZtdChartChanges(world, [
+    { action: 'create', id: 'c1', patch: { chartType: 'bar', cornerRadius: 8 } },
+  ]);
+  assert.equal(planned.find(op => op.aspect === CHART_ASPECT_ID).patch.cornerRadius, 8);
+  assert.throws(
+    () => planZtdChartChanges(world, [{ action: 'create', id: 'c2', patch: { cornerRadius: 200 } }]),
+    /cornerRadius/,
+  );
+});
+
 test('custom backgroundColor, highlight selection, neutralColor, and per-component itemColors work across SVG, DOM, commands, and Copilot tools', () => {
   const rows = [
     { channel: '검색', conversion: 42 },

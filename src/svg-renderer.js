@@ -366,6 +366,7 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
     takeaway,
     textOverrides,
     legendItems,
+    cornerRadius,
   } = resolved;
 
   const padX = variant === 'card' ? 20 : 12;
@@ -444,9 +445,9 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
   const fontFamily = escapeXml(resolvedTheme.fontFamily || 'Pretendard, -apple-system, BlinkMacSystemFont, sans-serif');
   const svg =
     `<g transform="${transformAttr}" data-chart-type="${escapeXml(resolved.chartType)}" font-family="${fontFamily}">` +
-    `<defs><clipPath id="${clipId}"><rect width="${width}" height="${height}" rx="14"/></clipPath></defs>` +
+    `<defs><clipPath id="${clipId}"><rect width="${width}" height="${height}" rx="${cornerRadius}"/></clipPath></defs>` +
     `<g clip-path="url(#${clipId})">` +
-    `<rect width="${width}" height="${height}" rx="14" fill="${escapeXml(resolvedTheme.panel)}" stroke="${escapeXml(resolvedTheme.line)}" stroke-width="1"/>` +
+    `<rect width="${width}" height="${height}" rx="${cornerRadius}" fill="${escapeXml(resolvedTheme.panel)}" stroke="${escapeXml(resolvedTheme.line)}" stroke-width="1"/>` +
     headerSvg +
     `<svg x="${plotX}" y="${plotY}" width="${plotWidth}" height="${plotHeight}" viewBox="${escapeXml(viewBox)}" preserveAspectRatio="xMidYMid meet">` +
     innerPlotSvg +
