@@ -7,6 +7,8 @@ import { renderChartSvg } from './svg-renderer.js';
 const mountedRoots = new WeakMap();
 const injectedDocs = new WeakSet();
 
+const NON_DATA_OPTION_KEYS = Object.freeze(['centerLabel', 'label', 'xLabel', 'yLabel', 'note']);
+
 function ensureDocumentBaseCss(doc) {
   if (!doc || typeof doc.createElement !== 'function' || injectedDocs.has(doc)) return;
   try {
@@ -16,7 +18,7 @@ function ensureDocumentBaseCss(doc) {
       style.textContent = [
         baseCss,
         '[data-role="ztd-chart-mount"] .ztd-card { height: 100%; box-sizing: border-box; margin: 0; }',
-        '[data-role="ztd-chart-mount"] [data-chart-field], [data-role="ztd-chart-mount"] [data-chart-text-slot], [data-role="ztd-chart-mount"] svg text, [data-role="ztd-chart-mount"] svg tspan { pointer-events: auto !important; cursor: text !important; }',
+        '[data-role="ztd-chart-mount"] [data-chart-field], [data-role="ztd-chart-mount"] [data-chart-option-field] { pointer-events: auto !important; cursor: text !important; }',
         'input[data-ztd-chart-editor="true"], input[data-ztd-chart-editor="true"]:focus, input[data-ztd-chart-editor="true"]:focus-visible { background: transparent !important; border: none !important; outline: none !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; }',
       ].join('\n');
       (doc.head ?? doc.documentElement)?.appendChild?.(style);
@@ -27,30 +29,7 @@ function ensureDocumentBaseCss(doc) {
   }
 }
 
-function applySlotOverride(el, slotKey, textOverrides) {
-  if (!el) return;
-  const currentText = el.textContent ?? '';
-  if (
-    el.dataset.baseText === undefined
-    || (el.dataset.appliedOverride !== undefined && currentText !== el.dataset.appliedOverride)
-  ) {
-    el.dataset.baseText = currentText;
-  }
-  const baseText = (el.dataset.baseText ?? '').trim();
-  const override = textOverrides?.[slotKey] ?? (baseText ? textOverrides?.[`text:${baseText}`] : undefined);
-  if (override !== undefined) {
-    const nextStr = String(override);
-    el.dataset.appliedOverride = nextStr;
-    if (el.textContent !== nextStr) {
-      el.textContent = nextStr;
-    }
-  } else if (el.dataset.appliedOverride !== undefined) {
-    el.textContent = el.dataset.baseText ?? '';
-    delete el.dataset.appliedOverride;
-  }
-}
-
-function ChartIslandContent({ activeSpec, variant, plotWidth, plotHeight, localeTag, textOverrides, cardLevel, hostEl }) {
+function ChartIslandContent({ activeSpec, variant, plotWidth, plotHeight, localeTag, textOverrides, cardNumber, cardLevel, hostEl }) {
   const wrapRef = React.useRef(null);
 
   React.useLayoutEffect(() => {
@@ -69,6 +48,9 @@ function ChartIslandContent({ activeSpec, variant, plotWidth, plotHeight, locale
       if (firstSpan && firstSpan !== titleEl) {
         firstSpan.dataset.chartField = 'cardNumber';
         firstSpan.dataset.chartTextSlot = 'field:cardNumber';
+        if (cardNumber !== undefined) {
+          firstSpan.textContent = String(cardNumber);
+        }
       }
     }
 
@@ -77,17 +59,6 @@ function ChartIslandContent({ activeSpec, variant, plotWidth, plotHeight, locale
     if (subtitleEl && !subtitleEl.closest?.('ul')) {
       subtitleEl.dataset.chartField = 'subtitle';
       subtitleEl.dataset.chartTextSlot = 'field:subtitle';
-    }
-
-    const legendItems = root.querySelectorAll?.('.ztd-card > header ul > li') ?? [];
-    for (let i = 0; i < legendItems.length; i++) {
-      const spans = legendItems[i].querySelectorAll?.('span') ?? [];
-      const labelSpan = spans.length > 0 ? spans[spans.length - 1] : null;
-      if (labelSpan && labelSpan.getAttribute?.('aria-hidden') !== 'true') {
-        const slotKey = `legend:${i}`;
-        labelSpan.dataset.chartTextSlot = slotKey;
-        applySlotOverride(labelSpan, slotKey, textOverrides);
-      }
     }
 
     const takeawayEl = root.querySelector('.ztd-card > footer > span:first-child');
@@ -106,25 +77,50 @@ function ChartIslandContent({ activeSpec, variant, plotWidth, plotHeight, locale
       }
     }
 
+    // Tag only explicit non-data option labels (e.g. centerLabel, gauge label, axis titles);
+    // never tag data categories, series names, numeric values, or axis ticks.
+    const optionValues = new Map();
+    for (const optKey of NON_DATA_OPTION_KEYS) {
+      const val = activeSpec?.options?.[optKey];
+      if (typeof val === 'string' && val.trim().length > 0) {
+        optionValues.set(val.trim(), optKey);
+      }
+    }
+
     const svgTexts = root.querySelectorAll?.('svg text') ?? [];
     for (let i = 0; i < svgTexts.length; i++) {
       const textEl = svgTexts[i];
-      const slotKey = `svg:${i}`;
-      textEl.dataset.chartTextSlot = slotKey;
-      if (textEl.style) {
-        textEl.style.pointerEvents = 'auto';
-        textEl.style.cursor = 'text';
+      const txt = (textEl.textContent ?? '').trim();
+      const matchedOpt = optionValues.get(txt);
+      if (matchedOpt) {
+        const slotKey = `option:${matchedOpt}`;
+        textEl.dataset.chartOptionField = matchedOpt;
+        textEl.dataset.chartTextSlot = slotKey;
+        if (textEl.style) {
+          textEl.style.pointerEvents = 'auto';
+          textEl.style.cursor = 'text';
+        }
+      } else {
+        delete textEl.dataset?.chartOptionField;
+        delete textEl.dataset?.chartTextSlot;
+        if (textEl.style) {
+          textEl.style.cursor = '';
+        }
       }
-      applySlotOverride(textEl, slotKey, textOverrides);
     }
 
-    const islandEl = hostEl?.closest?.('[data-entity-id]') ?? hostEl;
-    const activeSlot = islandEl?.__ztdActiveEditSlot ?? hostEl?.__ztdActiveEditSlot ?? null;
-    const allSlots = root.querySelectorAll?.('[data-chart-text-slot], [data-chart-field]') ?? [];
+    const outerIsland = hostEl?.closest?.('.ecanvas-island') ?? hostEl?.closest?.('[data-entity-id]') ?? hostEl;
+    const activeSlot = hostEl?.__ztdActiveEditSlot ?? outerIsland?.__ztdActiveEditSlot ?? null;
+    const allSlots = root.querySelectorAll?.('[data-chart-text-slot], [data-chart-field], [data-chart-option-field]') ?? [];
     for (const el of allSlots) {
       const matchesActive = Boolean(
         activeSlot
-        && (el.dataset?.chartTextSlot === activeSlot || `field:${el.dataset?.chartField}` === activeSlot || el.dataset?.chartField === activeSlot),
+        && (
+          el.dataset?.chartTextSlot === activeSlot
+          || `field:${el.dataset?.chartField}` === activeSlot
+          || `option:${el.dataset?.chartOptionField}` === activeSlot
+          || el.dataset?.chartField === activeSlot
+        ),
       );
       if (matchesActive) {
         if (el.style) el.style.opacity = '0';
@@ -187,6 +183,7 @@ export function renderChartDom(hostEl, props, derived, entityId = 'chart') {
     chartType,
     themeName,
     title,
+    cardNumber,
     cardLevel,
     textOverrides,
     legendItems,
@@ -249,6 +246,7 @@ export function renderChartDom(hostEl, props, derived, entityId = 'chart') {
       plotHeight,
       localeTag,
       textOverrides,
+      cardNumber,
       cardLevel,
       hostEl,
     }),

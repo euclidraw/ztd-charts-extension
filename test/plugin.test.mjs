@@ -322,6 +322,7 @@ test('inline editor supports double-click and Enter editing for title, subtitle,
         let cur = el;
         while (cur) {
           if (selector.includes('[data-chart-field]') && cur.dataset?.chartField) return cur;
+          if (selector.includes('[data-chart-option-field]') && cur.dataset?.chartOptionField) return cur;
           if (selector.includes('svg text') && cur.tagName === 'TEXT') return cur;
           if (selector.includes('[data-entity-id]') && cur.dataset?.entityId) return cur;
           cur = cur.parentElement;
@@ -329,7 +330,7 @@ test('inline editor supports double-click and Enter editing for title, subtitle,
         return null;
       },
       getBoundingClientRect() {
-        return el._rect ?? { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
+        return el._rect ?? { left: 110, top: 110, right: 320, bottom: 140, width: 210, height: 30 };
       },
       querySelector(selector) {
         if (selector.startsWith('[data-entity-id="')) {
@@ -340,11 +341,18 @@ test('inline editor supports double-click and Enter editing for title, subtitle,
           const field = selector.slice('[data-chart-field="'.length, -2);
           return children.find(c => c.dataset.chartField === field) ?? null;
         }
+        if (selector.startsWith('[data-chart-option-field="')) {
+          const optKey = selector.slice('[data-chart-option-field="'.length, -2);
+          return children.find(c => c.dataset.chartOptionField === optKey) ?? null;
+        }
         return null;
       },
       querySelectorAll(selector) {
         if (selector === 'svg text') {
           return children.filter(c => c.tagName === 'TEXT');
+        }
+        if (selector.includes('[data-chart-field]')) {
+          return children.filter(c => c.dataset?.chartField || c.dataset?.chartOptionField);
         }
         return [];
       },
@@ -376,6 +384,7 @@ test('inline editor supports double-click and Enter editing for title, subtitle,
           title: '초기 제목',
           subtitle: '단위: 건',
           takeaway: '초기 요약',
+          options: { centerLabel: '총합' },
           data: [
             { region: '서울', revenue: 1200 },
             { region: '부산', revenue: 850 },
@@ -383,20 +392,34 @@ test('inline editor supports double-click and Enter editing for title, subtitle,
         },
       },
     ]);
-    world.getComputed = id => (id === chartId ? { x: 100, y: 100, width: 480, height: 340, rotation: 0 } : undefined);
+    // Match real @alid/kernel CanvasWorld.getComputed(id, aspect) two-argument signature
+    world.getComputed = (id, aspect) => (
+      id === chartId && aspect === `computed.${CHART_ASPECT_ID}`
+        ? { x: 100, y: 100, width: 480, height: 340, rotation: 0 }
+        : undefined
+    );
 
     const surfaceEl = makeSyntheticElement('div', syntheticDoc);
     const hudEl = makeSyntheticElement('div', syntheticDoc);
     const islandEl = makeSyntheticElement('div', syntheticDoc);
     islandEl.dataset.entityId = chartId;
+    islandEl._rect = { left: 100, top: 100, right: 580, bottom: 440, width: 480, height: 340 };
     const titleEl = makeSyntheticElement('h2', syntheticDoc);
     titleEl.dataset.chartField = 'title';
     titleEl.textContent = '초기 제목';
+    titleEl._rect = { left: 120, top: 112, right: 360, bottom: 140, width: 240, height: 28 };
+    const subtitleEl = makeSyntheticElement('span', syntheticDoc);
+    subtitleEl.dataset.chartField = 'subtitle';
+    subtitleEl.textContent = '단위: 건';
+    subtitleEl._rect = { left: 120, top: 144, right: 260, bottom: 164, width: 140, height: 20 };
+    const centerLabelEl = makeSyntheticElement('text', syntheticDoc);
+    centerLabelEl.dataset.chartOptionField = 'centerLabel';
+    centerLabelEl.textContent = '총합';
     const svgTextEl = makeSyntheticElement('text', syntheticDoc);
     svgTextEl.textContent = '서울';
     const axisTickEl = makeSyntheticElement('text', syntheticDoc);
     axisTickEl.textContent = '50';
-    islandEl.append(titleEl, svgTextEl, axisTickEl);
+    islandEl.append(titleEl, subtitleEl, centerLabelEl, svgTextEl, axisTickEl);
     surfaceEl.append(islandEl);
 
     let historyChanges = 0;
@@ -443,8 +466,12 @@ test('inline editor supports double-click and Enter editing for title, subtitle,
       },
     });
 
-    // Double-click title -> zero-chrome transparent input -> edit with Korean IME composition
-    surfaceEl.dispatch('dblclick', { target: titleEl, clientX: 120, clientY: 120 });
+    // 1. Retargeted double-click (target = surfaceEl due to select-suite pointer capture)
+    // opens zero-chrome transparent input on non-data title field
+    surfaceEl.dispatch('pointerdown', { target: titleEl, clientX: 130, clientY: 122, pointerId: 1, button: 0 });
+    surfaceEl.dispatch('pointerup', { target: surfaceEl, clientX: 130, clientY: 122, pointerId: 1, button: 0 });
+    surfaceEl.dispatch('dblclick', { target: surfaceEl, clientX: 130, clientY: 122, button: 0 });
+
     const container = hudEl.children[0];
     assert.equal(container.children.length, 1, 'no separate floating badge element');
     const input = container.children[0];
@@ -461,31 +488,33 @@ test('inline editor supports double-click and Enter editing for title, subtitle,
     input.dispatch('keydown', { key: 'Enter', isComposing: true, keyCode: 229 });
     assert.equal(container.style.display, 'block');
     input.dispatch('compositionend');
+    input.dispatch('keydown', { key: 'Enter' });
+    assert.equal(container.style.display, 'none');
     assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).title, '지역별 매출 분석');
     assert.equal(historyChanges, 1);
+    assert.ok(historySeals >= 1);
 
-    // Double-click SVG text ("서울") -> updates data row cell in place
-    surfaceEl.dispatch('dblclick', { target: svgTextEl, clientX: 180, clientY: 220 });
-    assert.equal(titleEl.style.opacity, '', 'previous target opacity restored');
-    assert.equal(svgTextEl.style.opacity, '0');
-    assert.equal(input.value, '서울');
-    input.value = ' 수도권 ';
+    // 2. Double-clicking SVG data text ("서울") or numeric axis tick ("50") must NOT enter edit mode or mutate data
+    surfaceEl.dispatch('dblclick', { target: svgTextEl, clientX: 250, clientY: 260, button: 0 });
+    assert.equal(container.style.display, 'none', 'data category text must not enter edit mode');
+    assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).data[0].region, '서울');
+
+    surfaceEl.dispatch('dblclick', { target: axisTickEl, clientX: 250, clientY: 280, button: 0 });
+    assert.equal(container.style.display, 'none', 'numeric axis tick must not enter edit mode');
+    assert.deepEqual(world.getCanonical(chartId, CHART_ASPECT_ID).data, [
+      { region: '서울', revenue: 1200 },
+      { region: '부산', revenue: 850 },
+    ]);
+
+    // 3. Double-clicking explicit non-data option label (centerLabel) edits options.centerLabel without touching data
+    surfaceEl.dispatch('dblclick', { target: centerLabelEl, clientX: 240, clientY: 240, button: 0 });
+    assert.equal(container.style.display, 'block');
+    assert.equal(input.value, '총합');
+    input.value = '전체 합계';
     input.dispatch('input');
     input.dispatch('keydown', { key: 'Enter' });
     assert.equal(container.style.display, 'none');
-    assert.equal(svgTextEl.style.opacity, '');
-    assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).data[0].region, ' 수도권 ');
-    assert.ok(historySeals >= 1);
-
-    // Double-click arbitrary non-data SVG text (axis tick "50") -> updates textOverrides and SVG output
-    surfaceEl.dispatch('dblclick', { target: axisTickEl, clientX: 110, clientY: 200 });
-    assert.equal(input.value, '50');
-    input.value = '50억';
-    input.dispatch('input');
-    input.dispatch('keydown', { key: 'Enter' });
-    assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).options.textOverrides['svg:1'], '50억');
-    const { svg } = renderChartSvg(world.getCanonical(chartId, CHART_ASPECT_ID), { x: 0, y: 0, width: 480, height: 340, rotation: 0 }, chartId);
-    assert.ok(svg.includes('50억'));
+    assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).options.centerLabel, '전체 합계');
 
     editor.dispose();
   } finally {

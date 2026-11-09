@@ -1,7 +1,8 @@
 import { CHART_ASPECT_ID, EXTENSION_ID } from './manifest.js';
-import { resolveChartSpec } from './model.js';
+import { deriveChartGeometry, resolveChartSpec } from './model.js';
 
-const CARD_FIELDS = Object.freeze(['title', 'subtitle', 'takeaway', 'cardNumber', 'cardLevel']);
+export const CARD_FIELDS = Object.freeze(['title', 'subtitle', 'takeaway', 'cardNumber', 'cardLevel']);
+export const NON_DATA_OPTION_KEYS = Object.freeze(['centerLabel', 'label', 'xLabel', 'yLabel', 'note']);
 
 /**
  * Merges a local draft with concurrent remote updates so changes outside
@@ -64,14 +65,14 @@ export function parseDisplayedNumber(text) {
 }
 
 /**
- * Matches a clicked text string from inside the chart SVG or legend to data cells in `rows`.
+ * Detects whether a text string corresponds to a data cell (category, series, or numeric value)
+ * in `rows`. Used to guard against editing data cells via inline canvas text editing.
  */
 export function matchTextToChartData(rawText, rows, localeTag = 'ko-KR') {
   if (typeof rawText !== 'string') return null;
   const trimmed = rawText.trim();
   if (!trimmed || !Array.isArray(rows) || rows.length === 0) return null;
 
-  // 1. Check exact string cell matches (categories, series names, stages, nodes)
   const stringMatches = [];
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
     const row = rows[rowIndex];
@@ -94,7 +95,6 @@ export function matchTextToChartData(rawText, rows, localeTag = 'ko-KR') {
     };
   }
 
-  // 2. Check numeric cell matches (bar/line/pie values, KPI numbers, signed waterfall deltas)
   const parsedNum = parseDisplayedNumber(trimmed);
   if (parsedNum !== null) {
     const numMatches = [];
@@ -134,6 +134,24 @@ function isPlainRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Resolves the world-space bounding box of a chart entity across both the real
+ * `@alid/kernel` `CanvasWorld` (`getComputed(id, aspect)`) and lightweight test mocks.
+ */
+export function getChartWorldBounds(world, entityId, props) {
+  if (!world || !entityId) return null;
+  const computed =
+    world.getComputed?.(entityId, `computed.${CHART_ASPECT_ID}`)
+    ?? world.getComputed?.(entityId, 'computed.effectiveBounds')
+    ?? world.getComputed?.(entityId, 'computed.layoutBounds')
+    ?? world.getComputed?.(entityId);
+  if (computed && Number.isFinite(computed.width) && Number.isFinite(computed.height)) {
+    return computed;
+  }
+  const fallbackProps = props ?? world.getCanonical?.(entityId, CHART_ASPECT_ID);
+  return deriveChartGeometry(fallbackProps, entityId, world);
+}
+
 function readTargetValue(props, target) {
   if (!props || !target) return '';
   const resolved = resolveChartSpec(props);
@@ -156,32 +174,28 @@ function readTargetValue(props, target) {
     return String(resolved[field] ?? '');
   }
 
-  if (target.kind === 'data') {
-    const rows = resolved.spec.data ?? [];
-    const row = rows[target.rowIndex];
-    if (!row || typeof row !== 'object') return target.initialValue ?? '';
-    const val = row[target.colKey];
-    return val !== undefined && val !== null ? String(val) : '';
-  }
-
-  if (target.kind === 'override') {
-    if (target.baseText && textOverrides[`text:${target.baseText}`] !== undefined) {
-      return String(textOverrides[`text:${target.baseText}`]);
-    }
-    return String(target.initialValue ?? target.baseText ?? '');
+  if (target.kind === 'option') {
+    const optKey = target.optionKey;
+    const rawOpt = props.options?.[optKey] ?? resolved.spec?.options?.[optKey];
+    if (typeof rawOpt === 'string') return rawOpt;
+    return String(target.initialValue ?? '');
   }
 
   return '';
 }
 
+/**
+ * Builds a canonical patch for non-data targets only.
+ * Never mutates `props.data`.
+ */
 function buildPatchForTarget(props, target, rawValue) {
   if (!props || !target) return null;
-  const resolved = resolveChartSpec(props);
   const prevOptions = isPlainRecord(props.options) ? { ...props.options } : {};
   const prevOverrides = isPlainRecord(prevOptions.textOverrides) ? { ...prevOptions.textOverrides } : {};
 
   if (target.kind === 'field') {
     const field = target.field;
+    if (!CARD_FIELDS.includes(field)) return null;
     const currentVal = readTargetValue(props, target);
     if (rawValue === currentVal && (field === 'cardNumber' || field === 'cardLevel' || props[field] === rawValue)) {
       return null;
@@ -222,99 +236,23 @@ function buildPatchForTarget(props, target, rawValue) {
     };
   }
 
-  if (target.kind === 'data') {
-    const sourceRows = resolved.spec.data ?? [];
-    const nextRows = sourceRows.map(row => ({ ...row }));
-    const nextOptions = { ...prevOptions };
-    const nextOverrides = { ...prevOverrides };
-
-    if (target.cellKind === 'number') {
-      const num = parseDisplayedNumber(rawValue);
-      if (num !== null && sourceRows.length > 0) {
-        let changed = false;
-        for (const m of target.matches) {
-          if (nextRows[m.rowIndex] && nextRows[m.rowIndex][m.colKey] !== num) {
-            nextRows[m.rowIndex][m.colKey] = num;
-            changed = true;
-          }
-        }
-        if (target.slotKey && nextOverrides[target.slotKey] !== undefined) {
-          delete nextOverrides[target.slotKey];
-          changed = true;
-        }
-        if (!changed) return null;
-        return {
-          data: nextRows,
-          encoding: { ...(resolved.spec.encoding ?? {}) },
-          options: { ...nextOptions, textOverrides: nextOverrides },
-        };
-      }
-      // Non-numeric text entered into a numeric label: store as a display text override
-      const slotKey = target.slotKey || `text:${target.baseText || target.initialValue}`;
-      if (nextOverrides[slotKey] === rawValue) return null;
-      nextOverrides[slotKey] = rawValue;
-      return {
-        options: { ...nextOptions, textOverrides: nextOverrides },
-      };
+  if (target.kind === 'option') {
+    const optKey = target.optionKey;
+    if (!NON_DATA_OPTION_KEYS.includes(optKey)) return null;
+    const slotKey = target.slotKey || `option:${optKey}`;
+    const currentVal = readTargetValue(props, target);
+    if (rawValue === currentVal && prevOptions[optKey] === rawValue) {
+      return null;
     }
-
-    // String data cell
-    if (rawValue.trim().length > 0 && sourceRows.length > 0) {
-      let changed = false;
-      const oldCellVal = String(sourceRows[target.rowIndex]?.[target.colKey] ?? '');
-      for (const m of target.matches) {
-        if (nextRows[m.rowIndex] && nextRows[m.rowIndex][m.colKey] !== rawValue) {
-          nextRows[m.rowIndex][m.colKey] = rawValue;
-          changed = true;
-        }
-      }
-      if (oldCellVal && nextOptions.highlight === oldCellVal) {
-        nextOptions.highlight = rawValue;
-        changed = true;
-      }
-      if (target.slotKey && nextOverrides[target.slotKey] !== undefined) {
-        delete nextOverrides[target.slotKey];
-        changed = true;
-      }
-      if (oldCellVal && nextOverrides[`text:${oldCellVal}`] !== undefined) {
-        delete nextOverrides[`text:${oldCellVal}`];
-        changed = true;
-      }
-      if (!changed) return null;
-      return {
-        data: nextRows,
-        encoding: { ...(resolved.spec.encoding ?? {}) },
-        options: { ...nextOptions, textOverrides: nextOverrides },
-      };
-    }
-
-    // Empty string while typing: hold in textOverrides so chart validation never breaks
-    const slotKey = target.slotKey || `text:${target.baseText || target.initialValue}`;
-    if (nextOverrides[slotKey] === rawValue) return null;
-    nextOverrides[slotKey] = rawValue;
     return {
-      options: { ...nextOptions, textOverrides: nextOverrides },
-    };
-  }
-
-  if (target.kind === 'override') {
-    const slotKey = target.slotKey || `text:${target.baseText || target.initialValue}`;
-    const nextOptions = { ...prevOptions };
-    const nextOverrides = { ...prevOverrides };
-
-    for (const optKey of ['centerLabel', 'label', 'xLabel', 'yLabel', 'note']) {
-      if (
-        typeof resolved.spec?.options?.[optKey] === 'string'
-        && resolved.spec.options[optKey].trim() === (target.baseText ?? '').trim()
-      ) {
-        nextOptions[optKey] = rawValue;
-      }
-    }
-
-    if (nextOverrides[slotKey] === rawValue) return null;
-    nextOverrides[slotKey] = rawValue;
-    return {
-      options: { ...nextOptions, textOverrides: nextOverrides },
+      options: {
+        ...prevOptions,
+        [optKey]: rawValue,
+        textOverrides: {
+          ...prevOverrides,
+          [slotKey]: rawValue,
+        },
+      },
     };
   }
 
@@ -324,6 +262,21 @@ function buildPatchForTarget(props, target, rawValue) {
 function findIslandElement(surfaceEl, entityId) {
   if (!surfaceEl || typeof surfaceEl.querySelector !== 'function') return null;
   return surfaceEl.querySelector(`[data-entity-id="${entityId}"]`);
+}
+
+function setActiveSlotOnIsland(surfaceEl, entityId, slotKey) {
+  const islandEl = findIslandElement(surfaceEl, entityId);
+  if (islandEl) {
+    if (slotKey) islandEl.__ztdActiveEditSlot = slotKey;
+    else delete islandEl.__ztdActiveEditSlot;
+  }
+  if (surfaceEl && typeof surfaceEl.querySelectorAll === 'function') {
+    const allMatching = surfaceEl.querySelectorAll(`[data-entity-id="${entityId}"]`);
+    for (const node of allMatching) {
+      if (slotKey) node.__ztdActiveEditSlot = slotKey;
+      else delete node.__ztdActiveEditSlot;
+    }
+  }
 }
 
 function findFieldElementInIsland(islandEl, field) {
@@ -352,10 +305,8 @@ function findSlotElementInIsland(islandEl, target) {
   if (target.kind === 'field' && target.field) {
     return findFieldElementInIsland(islandEl, target.field);
   }
-  if (target.slotKey?.startsWith('svg:') && typeof islandEl.querySelectorAll === 'function') {
-    const idx = Number(target.slotKey.slice(4));
-    const svgTexts = islandEl.querySelectorAll('svg text');
-    if (Number.isInteger(idx) && svgTexts[idx]) return svgTexts[idx];
+  if (target.kind === 'option' && target.optionKey && typeof islandEl.querySelector === 'function') {
+    return islandEl.querySelector(`[data-chart-option-field="${target.optionKey}"]`);
   }
   return null;
 }
@@ -372,21 +323,72 @@ function isScreenReaderOrHidden(el) {
   return false;
 }
 
-function inferSlotKeyForElement(islandEl, el) {
+function matchNonDataOptionKey(el, resolved) {
   if (!el) return null;
-  if (el.dataset?.chartTextSlot) return el.dataset.chartTextSlot;
-  if (el.dataset?.chartField) return `field:${el.dataset.chartField}`;
-  if (el.tagName?.toLowerCase?.() === 'text' && islandEl && typeof islandEl.querySelectorAll === 'function') {
-    const list = Array.from(islandEl.querySelectorAll('svg text'));
-    const idx = list.indexOf(el);
-    if (idx >= 0) return `svg:${idx}`;
+  const explicit = el.getAttribute?.('data-chart-option-field') ?? el.dataset?.chartOptionField;
+  if (explicit && NON_DATA_OPTION_KEYS.includes(explicit)) {
+    return explicit;
+  }
+  const text = (el.textContent ?? '').trim();
+  if (!text) return null;
+  // Never treat data cell values or numbers as non-data options
+  const rows = resolved?.spec?.data ?? [];
+  if (matchTextToChartData(text, rows, resolved?.localeTag) || parseDisplayedNumber(text) !== null) {
+    return null;
+  }
+  for (const optKey of NON_DATA_OPTION_KEYS) {
+    const optVal = resolved?.spec?.options?.[optKey];
+    if (typeof optVal === 'string' && optVal.trim().length > 0 && optVal.trim() === text) {
+      return optKey;
+    }
   }
   return null;
 }
 
-function buildTargetFromElement(islandEl, el, resolved) {
+/**
+ * Returns true if `el` belongs to the chart's data area (SVG marks, data labels,
+ * numeric values, axis ticks, or series legend items) and is NOT a non-data option label.
+ */
+function isDataAreaElement(el, resolved) {
+  if (!el) return false;
+  let cur = el;
+  while (cur) {
+    if (cur.dataset?.chartField && CARD_FIELDS.includes(cur.dataset.chartField)) {
+      return false;
+    }
+    const optKey = matchNonDataOptionKey(cur, resolved);
+    if (optKey) {
+      return false;
+    }
+    const tag = cur.tagName?.toLowerCase?.();
+    if (
+      tag === 'svg'
+      || tag === 'text'
+      || tag === 'tspan'
+      || tag === 'rect'
+      || tag === 'path'
+      || tag === 'circle'
+      || tag === 'line'
+      || tag === 'polygon'
+      || tag === 'polyline'
+      || tag === 'g'
+      || tag === 'ul'
+      || tag === 'li'
+    ) {
+      return true;
+    }
+    cur = cur.parentElement;
+  }
+  return false;
+}
+
+/**
+ * Builds an editable target strictly for non-data elements (`title`, `subtitle`,
+ * `takeaway`, `cardNumber`, `cardLevel`, and explicit non-data option labels).
+ * Returns `null` for any data element.
+ */
+function buildNonDataTargetFromElement(islandEl, el, resolved) {
   if (!el || isScreenReaderOrHidden(el)) return null;
-  const rows = resolved.spec.data ?? [];
 
   const fieldEl = el.closest?.('[data-chart-field]') ?? (el.dataset?.chartField ? el : null);
   if (fieldEl) {
@@ -403,73 +405,43 @@ function buildTargetFromElement(islandEl, el, resolved) {
     }
   }
 
-  const svgTextEl = el.closest?.('svg text') ?? (el.tagName?.toLowerCase?.() === 'text' ? el : null);
-  if (svgTextEl && !isScreenReaderOrHidden(svgTextEl)) {
-    const displayedText = (svgTextEl.textContent ?? '').trim();
-    const baseText = (svgTextEl.dataset?.baseText ?? displayedText).trim();
-    const slotKey = inferSlotKeyForElement(islandEl, svgTextEl) || `text:${baseText || displayedText}`;
-    const matched = matchTextToChartData(baseText, rows, resolved.localeTag)
-      ?? matchTextToChartData(displayedText, rows, resolved.localeTag);
-
-    if (matched) {
+  const optEl = el.closest?.('[data-chart-option-field]') ?? (el.dataset?.chartOptionField ? el : null);
+  if (optEl) {
+    const optKey = optEl.getAttribute?.('data-chart-option-field') ?? optEl.dataset?.chartOptionField;
+    if (NON_DATA_OPTION_KEYS.includes(optKey)) {
       return {
         target: {
-          ...matched,
-          slotKey,
-          baseText: baseText || displayedText,
-          initialValue: matched.cellKind === 'number' ? matched.initialValue : (displayedText || matched.initialValue),
+          kind: 'option',
+          optionKey: optKey,
+          slotKey: `option:${optKey}`,
+          initialValue: (optEl.textContent ?? '').trim(),
+        },
+        anchorEl: optEl,
+      };
+    }
+  }
+
+  const svgTextEl = el.closest?.('svg text') ?? (el.tagName?.toLowerCase?.() === 'text' ? el : null);
+  if (svgTextEl) {
+    const optKey = matchNonDataOptionKey(svgTextEl, resolved);
+    if (optKey) {
+      return {
+        target: {
+          kind: 'option',
+          optionKey: optKey,
+          slotKey: `option:${optKey}`,
+          initialValue: (svgTextEl.textContent ?? '').trim(),
         },
         anchorEl: svgTextEl,
       };
     }
-
-    return {
-      target: {
-        kind: 'override',
-        slotKey,
-        baseText: baseText || displayedText,
-        initialValue: displayedText || baseText,
-      },
-      anchorEl: svgTextEl,
-    };
+    // Data label, numeric value, or axis tick inside SVG -> not editable
+    return null;
   }
 
-  const slotEl = el.closest?.('[data-chart-text-slot]') ?? (el.dataset?.chartTextSlot ? el : null);
-  if (slotEl && !isScreenReaderOrHidden(slotEl)) {
-    const slotKey = slotEl.getAttribute?.('data-chart-text-slot') ?? slotEl.dataset?.chartTextSlot;
-    if (slotKey?.startsWith('field:')) {
-      const field = slotKey.slice(6);
-      if (CARD_FIELDS.includes(field)) {
-        return {
-          target: { kind: 'field', field, slotKey },
-          anchorEl: slotEl,
-        };
-      }
-    }
-    const displayedText = (slotEl.textContent ?? '').trim();
-    const baseText = (slotEl.dataset?.baseText ?? displayedText).trim();
-    const matched = matchTextToChartData(baseText, rows, resolved.localeTag)
-      ?? matchTextToChartData(displayedText, rows, resolved.localeTag);
-    if (matched) {
-      return {
-        target: {
-          ...matched,
-          slotKey,
-          baseText: baseText || displayedText,
-          initialValue: displayedText || matched.initialValue,
-        },
-        anchorEl: slotEl,
-      };
-    }
-    return {
-      target: {
-        kind: 'override',
-        slotKey,
-        baseText: baseText || displayedText,
-        initialValue: displayedText || baseText,
-      },
-      anchorEl: slotEl,
-    };
+  // Any other SVG mark or series legend item -> data area, not editable
+  if (isDataAreaElement(el, resolved)) {
+    return null;
   }
 
   const headerTitle = el.closest?.('.ztd-card > header h1, .ztd-card > header h2, .ztd-card > header h3');
@@ -496,29 +468,28 @@ function buildTargetFromElement(islandEl, el, resolved) {
           anchorEl: spanEl,
         };
       }
-      const matched = matchTextToChartData(spanText, rows, resolved.localeTag);
-      const slotKey = inferSlotKeyForElement(islandEl, spanEl) || `text:${spanText}`;
-      if (matched) {
+      if (spanText === String(resolved.cardNumber ?? '')) {
         return {
-          target: {
-            ...matched,
-            slotKey,
-            baseText: spanText,
-            initialValue: spanText,
-          },
+          target: { kind: 'field', field: 'cardNumber', slotKey: 'field:cardNumber' },
           anchorEl: spanEl,
         };
       }
-      return {
-        target: {
-          kind: 'override',
-          slotKey,
-          baseText: spanText,
-          initialValue: spanText,
-        },
-        anchorEl: spanEl,
-      };
+      if (spanText === String(resolved.cardLevel ?? '')) {
+        return {
+          target: { kind: 'field', field: 'cardLevel', slotKey: 'field:cardLevel' },
+          anchorEl: spanEl,
+        };
+      }
     }
+  }
+
+  const headerEl = el.closest?.('.ztd-card > header');
+  if (headerEl) {
+    const titleEl = findFieldElementInIsland(islandEl, 'title') ?? headerEl;
+    return {
+      target: { kind: 'field', field: 'title', slotKey: 'field:title' },
+      anchorEl: titleEl,
+    };
   }
 
   const footerEl = el.closest?.('.ztd-card > footer');
@@ -533,13 +504,15 @@ function buildTargetFromElement(islandEl, el, resolved) {
   return null;
 }
 
-function resolveHitTargetInIsland(islandEl, clientX, clientY, eventTarget, props, bounds, worldPoint) {
+function resolveHitTargetInIsland(islandEl, clientX, clientY, eventTARGETS, props, bounds, worldPoint) {
   const resolved = resolveChartSpec(props);
   const doc = islandEl?.ownerDocument;
 
   const candidates = [];
-  if (eventTarget && islandEl?.contains?.(eventTarget)) {
-    candidates.push(eventTarget);
+  for (const t of eventTARGETS) {
+    if (t && islandEl?.contains?.(t) && !candidates.includes(t)) {
+      candidates.push(t);
+    }
   }
   if (doc && typeof doc.elementsFromPoint === 'function' && Number.isFinite(clientX) && Number.isFinite(clientY)) {
     for (const el of doc.elementsFromPoint(clientX, clientY)) {
@@ -554,22 +527,28 @@ function resolveHitTargetInIsland(islandEl, clientX, clientY, eventTarget, props
     }
   }
 
+  // 1. Check direct DOM candidates first. If a candidate is a data element, reject immediately.
   for (const el of candidates) {
-    const hit = buildTargetFromElement(islandEl, el, resolved);
+    if (el === islandEl) continue;
+    const hit = buildNonDataTargetFromElement(islandEl, el, resolved);
     if (hit) return hit;
+    if (isDataAreaElement(el, resolved)) {
+      return null;
+    }
   }
 
-  // Always scan editable text bounding rects when pointer capture or SVG layering prevented direct hit
+  // 2. Scan non-data text bounding rects when pointer capture retargeted `event.target` to the surface
   if (islandEl && typeof islandEl.querySelectorAll === 'function' && Number.isFinite(clientX) && Number.isFinite(clientY)) {
-    const selector = '[data-chart-text-slot], [data-chart-field], svg text, .ztd-card > header h1, .ztd-card > header h2, .ztd-card > header h3, .ztd-card > header span, .ztd-card > footer span';
-    const nodes = islandEl.querySelectorAll(selector);
+    const nonDataNodes = islandEl.querySelectorAll(
+      '[data-chart-field], [data-chart-option-field], .ztd-card > header h1, .ztd-card > header h2, .ztd-card > header h3',
+    );
     let bestNode = null;
     let bestScore = Infinity;
-    for (const node of nodes) {
+    for (const node of nonDataNodes) {
       if (isScreenReaderOrHidden(node)) continue;
       const rect = node.getBoundingClientRect?.();
       if (!rect || rect.width <= 0 || rect.height <= 0) continue;
-      const pad = 6;
+      const pad = 8;
       if (
         clientX >= rect.left - pad
         && clientX <= rect.right + pad
@@ -588,25 +567,92 @@ function resolveHitTargetInIsland(islandEl, clientX, clientY, eventTarget, props
       }
     }
     if (bestNode) {
-      const hit = buildTargetFromElement(islandEl, bestNode, resolved);
+      const hit = buildNonDataTargetFromElement(islandEl, bestNode, resolved);
       if (hit) return hit;
+    }
+
+    // If the click was inside the SVG plot box (and didn't hit a non-data option label above)
+    // or inside the data series legend `<ul>`, do not enter edit mode on the data area.
+    const dataContainers = islandEl.querySelectorAll('svg, .ztd-card > header ul');
+    for (const dataBox of dataContainers) {
+      const rect = dataBox.getBoundingClientRect?.();
+      if (
+        rect
+        && rect.width > 0
+        && rect.height > 0
+        && clientX >= rect.left
+        && clientX <= rect.right
+        && clientY >= rect.top
+        && clientY <= rect.bottom
+      ) {
+        return null;
+      }
+    }
+
+    const headerEl = islandEl.querySelector?.('.ztd-card > header');
+    const headerRect = headerEl?.getBoundingClientRect?.();
+    if (
+      headerRect
+      && headerRect.width > 0
+      && headerRect.height > 0
+      && clientX >= headerRect.left - 4
+      && clientX <= headerRect.right + 4
+      && clientY >= headerRect.top - 4
+      && clientY <= headerRect.bottom + 4
+    ) {
+      return {
+        target: { kind: 'field', field: 'title', slotKey: 'field:title' },
+        anchorEl: findFieldElementInIsland(islandEl, 'title') ?? headerEl,
+      };
+    }
+
+    const footerEl = islandEl.querySelector?.('.ztd-card > footer');
+    const footerRect = footerEl?.getBoundingClientRect?.();
+    if (
+      footerRect
+      && footerRect.width > 0
+      && footerRect.height > 0
+      && clientX >= footerRect.left - 4
+      && clientX <= footerRect.right + 4
+      && clientY >= footerRect.top - 4
+      && clientY <= footerRect.bottom + 4
+    ) {
+      return {
+        target: { kind: 'field', field: 'takeaway', slotKey: 'field:takeaway' },
+        anchorEl: findFieldElementInIsland(islandEl, 'takeaway') ?? footerEl,
+      };
     }
   }
 
-  // Fallback by local Y coordinate within the card bounds
+  // 3. Fallback by local Y coordinate within the card non-data header/footer zones
   if (bounds && worldPoint && resolved.variant === 'card') {
     const localY = worldPoint.y - bounds.y;
-    if (localY >= 42 && localY < 68) {
+    const hasSubtitle = Boolean(resolved.subtitle);
+    const hasLegend = (resolved.legendItems?.length ?? 0) > 0;
+    const headerBottom = 56 + (hasSubtitle ? 22 : 0) + (hasLegend ? 20 : 0);
+    const footerTop = bounds.height - 52;
+
+    if (localY >= 40 && localY <= headerBottom && hasSubtitle) {
       return {
         target: { kind: 'field', field: 'subtitle', slotKey: 'field:subtitle' },
         anchorEl: findFieldElementInIsland(islandEl, 'subtitle'),
       };
     }
-    if (localY > bounds.height - 48) {
+    if (localY >= footerTop) {
       return {
         target: { kind: 'field', field: 'takeaway', slotKey: 'field:takeaway' },
         anchorEl: findFieldElementInIsland(islandEl, 'takeaway'),
       };
+    }
+    if (localY <= headerBottom) {
+      return {
+        target: { kind: 'field', field: 'title', slotKey: 'field:title' },
+        anchorEl: findFieldElementInIsland(islandEl, 'title'),
+      };
+    }
+    // Clicked inside the central data plot region -> only open if there is no SVG mounted in the island
+    if (islandEl?.querySelector?.('svg')) {
+      return null;
     }
   }
 
@@ -712,9 +758,19 @@ function estimateTextPixelWidth(text, fontSizePx) {
   return Math.ceil(Math.max(1.5, units + 0.8) * fontSizePx);
 }
 
+function resolveToolSurface(provider) {
+  const active = provider?.get?.();
+  if (active?.surface?.hud && active?.surface?.element) {
+    return active;
+  }
+  return null;
+}
+
 /**
  * Mounts a seamless, zero-chrome inline text editor onto the active Alid canvas HUD
- * so every text in a chart can be edited directly in place via double-click or `Enter`.
+ * so non-data text areas of a chart (`title`, `subtitle`, `takeaway`, `cardNumber`,
+ * `cardLevel`, and explicit non-data option labels) can be edited in place via
+ * double-click or `Enter`.
  */
 export function mountInlineEditor(context) {
   const provider = context?.services?.get?.('canvas.active-tool-surface');
@@ -724,20 +780,30 @@ export function mountInlineEditor(context) {
   let closeCurrent = () => {};
   let openCurrent = () => false;
   let detachCurrent = () => {};
+  let mountedSurfaceEl = null;
 
   function mount() {
-    closeCurrent();
-    detachCurrent();
-
-    const s = provider?.get?.();
+    const s = resolveToolSurface(provider);
     if (!s?.surface?.hud || !s?.surface?.element || typeof document === 'undefined') {
+      closeCurrent();
+      detachCurrent();
+      mountedSurfaceEl = null;
+      return;
+    }
+    if (mountedSurfaceEl === s.surface.element) {
       return;
     }
 
+    closeCurrent();
+    detachCurrent();
+    mountedSurfaceEl = s.surface.element;
+
     let session = null;
     let composing = false;
-    let until = 0;
     let offWorld = () => {};
+    let lastOpenedAt = 0;
+    let downState = null;
+    let lastTap = null;
 
     const doc = s.surface.hud.ownerDocument ?? document;
     const container = doc.createElement('div');
@@ -780,9 +846,9 @@ export function mountInlineEditor(context) {
     s.surface.hud.append(container);
 
     let hiddenElements = [];
-    function restoreHiddenElements(islandEl) {
-      if (islandEl) {
-        delete islandEl.__ztdActiveEditSlot;
+    function restoreHiddenElements(entityId) {
+      if (entityId) {
+        setActiveSlotOnIsland(s.surface.element, entityId, null);
       }
       for (const el of hiddenElements) {
         if (el && el.style) el.style.opacity = '';
@@ -804,14 +870,13 @@ export function mountInlineEditor(context) {
       if (!session) return;
       const props = context.world.getCanonical?.(session.id, CHART_ASPECT_ID);
       if (!props) return;
-      const resolved = resolveChartSpec(props);
 
       const hudRect = s.surface.hud.getBoundingClientRect?.() ?? { left: 0, top: 0, width: 0, height: 0 };
       const zoom = Math.max(0.1, s.host?.getZoom?.() ?? 1);
       const islandEl = findIslandElement(s.surface.element, session.id);
 
-      if (islandEl && session.target.slotKey) {
-        islandEl.__ztdActiveEditSlot = session.target.slotKey;
+      if (session.target.slotKey) {
+        setActiveSlotOnIsland(s.surface.element, session.id, session.target.slotKey);
       }
 
       const liveTargetEl = findSlotElementInIsland(islandEl, session.target) ?? session.anchorEl;
@@ -870,24 +935,23 @@ export function mountInlineEditor(context) {
       }
 
       // Fallback world-coordinate placement when editing an empty field via Enter
-      const b = context.world.getComputed?.(session.id) ?? context.world.getCanonical?.(session.id, 'core.bounds');
-      const t = context.world.getCanonical?.(session.id, 'core.transform') ?? { x: 0, y: 0 };
-      const wx = Number.isFinite(b?.x) ? b.x : (Number.isFinite(t.x) ? t.x : 0);
-      const wy = Number.isFinite(b?.y) ? b.y : (Number.isFinite(t.y) ? t.y : 0);
+      const b = getChartWorldBounds(context.world, session.id, props);
+      const wx = Number.isFinite(b?.x) ? b.x : 0;
+      const wy = Number.isFinite(b?.y) ? b.y : 0;
       const ww = Number.isFinite(b?.width) ? b.width : 480;
       const wh = Number.isFinite(b?.height) ? b.height : 340;
 
       const topLeft = { x: 0, y: 0 };
       const bottomRight = { x: 0, y: 0 };
-      s.host.worldToScreen(wx, wy, topLeft);
-      s.host.worldToScreen(wx + ww, wy + wh, bottomRight);
+      s.host?.worldToScreen?.(wx, wy, topLeft);
+      s.host?.worldToScreen?.(wx + ww, wy + wh, bottomRight);
       const boxLeft = topLeft.x - hudRect.left;
       const boxTop = topLeft.y - hudRect.top;
       const boxWidth = Math.max(160, bottomRight.x - topLeft.x);
       const boxHeight = Math.max(120, bottomRight.y - topLeft.y);
 
       const field = session.target.field ?? 'title';
-      const yOffset = field === 'title'
+      const yOffset = field === 'title' || field === 'cardNumber'
         ? 18 * zoom
         : field === 'subtitle'
           ? 46 * zoom
@@ -935,11 +999,9 @@ export function mountInlineEditor(context) {
       const ending = session;
       session = null;
       composing = false;
-      until = 0;
       offWorld();
       offWorld = () => {};
-      const islandEl = findIslandElement(s.surface.element, ending.id);
-      restoreHiddenElements(islandEl);
+      restoreHiddenElements(ending.id);
       container.style.display = 'none';
 
       if (commit && context.world.isAlive?.(ending.id)) {
@@ -966,7 +1028,8 @@ export function mountInlineEditor(context) {
     }
 
     function startEditing(entityId, target, explicitAnchorEl = null) {
-      if (!entityId || !context.world.isAlive?.(entityId)) return false;
+      if (!entityId || !target || !context.world.isAlive?.(entityId)) return false;
+      if (context.world.isEntityReadOnly?.(entityId)) return false;
       const props = context.world.getCanonical?.(entityId, CHART_ASPECT_ID);
       if (!props) return false;
 
@@ -981,8 +1044,8 @@ export function mountInlineEditor(context) {
       const metrics = captureAnchorMetrics(islandEl, anchorEl, target, resolved, zoom);
       const initial = readTargetValue(props, target);
 
-      if (islandEl && target.slotKey) {
-        islandEl.__ztdActiveEditSlot = target.slotKey;
+      if (target.slotKey) {
+        setActiveSlotOnIsland(s.surface.element, entityId, target.slotKey);
       }
       if (anchorEl) {
         hideTargetElement(anchorEl);
@@ -996,12 +1059,19 @@ export function mountInlineEditor(context) {
         base: initial,
         writing: false,
       };
+      lastOpenedAt = Date.now();
 
       input.value = initial;
       container.style.display = 'block';
       positionEditor();
       input.focus?.();
       input.select?.();
+      queueMicrotask(() => {
+        if (session && session.id === entityId && doc.activeElement !== input) {
+          input.focus?.();
+          input.select?.();
+        }
+      });
 
       offWorld = context.world.subscribe?.(() => {
         if (!session || session.writing) return;
@@ -1038,13 +1108,13 @@ export function mountInlineEditor(context) {
 
       if (islandEl && typeof islandEl.querySelectorAll === 'function') {
         const nodes = Array.from(
-          islandEl.querySelectorAll('[data-chart-field], [data-chart-text-slot], svg text'),
+          islandEl.querySelectorAll('[data-chart-field], [data-chart-option-field]'),
         ).filter(el => !isScreenReaderOrHidden(el));
 
         const uniqueSlots = [];
         const seen = new Set();
         for (const el of nodes) {
-          const hit = buildTargetFromElement(islandEl, el, resolved);
+          const hit = buildNonDataTargetFromElement(islandEl, el, resolved);
           if (!hit || !hit.target.slotKey || seen.has(hit.target.slotKey)) continue;
           seen.add(hit.target.slotKey);
           uniqueSlots.push(hit);
@@ -1066,7 +1136,128 @@ export function mountInlineEditor(context) {
       startEditing(entityId, { kind: 'field', field: nextField, slotKey: `field:${nextField}` });
     }
 
-    const locked = e => Boolean(composing || e?.isComposing || e?.keyCode === 229 || Date.now() < until);
+    function resolveChartEntityAtPoint(clientX, clientY, candidateTargets) {
+      const worldPoint = { x: 0, y: 0 };
+      if (Number.isFinite(clientX) && Number.isFinite(clientY) && s.host?.screenToWorld) {
+        s.host.screenToWorld(clientX, clientY, worldPoint);
+      }
+
+      // 1. Check candidate targets (event.target, captured pointerdown target)
+      for (const candidate of candidateTargets) {
+        if (!candidate || typeof candidate.closest !== 'function') continue;
+        const island = candidate.closest('[data-entity-id]');
+        const id = island?.getAttribute?.('data-entity-id') ?? island?.dataset?.entityId;
+        if (id && context.world.getCanonical?.(id, CHART_ASPECT_ID)) {
+          return {
+            hitId: id,
+            hitBounds: getChartWorldBounds(context.world, id),
+            worldPoint,
+          };
+        }
+      }
+
+      // 2. Check elementsFromPoint / elementFromPoint at (clientX, clientY)
+      if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
+        const pointEls = typeof doc.elementsFromPoint === 'function'
+          ? doc.elementsFromPoint(clientX, clientY)
+          : typeof doc.elementFromPoint === 'function'
+            ? [doc.elementFromPoint(clientX, clientY)].filter(Boolean)
+            : [];
+        for (const el of pointEls) {
+          if (!el || typeof el.closest !== 'function') continue;
+          const island = el.closest('[data-entity-id]');
+          const id = island?.getAttribute?.('data-entity-id') ?? island?.dataset?.entityId;
+          if (id && context.world.getCanonical?.(id, CHART_ASPECT_ID)) {
+            return {
+              hitId: id,
+              hitBounds: getChartWorldBounds(context.world, id),
+              worldPoint,
+            };
+          }
+        }
+      }
+
+      // 3. Check world-space bounds across selected and live chart entities
+      const selected = s.selection?.getSelection?.() ?? [];
+      const ids = [
+        ...selected,
+        ...(context.world.listEntityIds?.() ?? []),
+      ];
+      const visited = new Set();
+      for (const id of ids) {
+        if (!id || visited.has(id)) continue;
+        visited.add(id);
+        const props = context.world.getCanonical?.(id, CHART_ASPECT_ID);
+        if (!props) continue;
+        const b = getChartWorldBounds(context.world, id, props);
+        if (
+          b
+          && worldPoint.x >= b.x
+          && worldPoint.x <= b.x + b.width
+          && worldPoint.y >= b.y
+          && worldPoint.y <= b.y + b.height
+        ) {
+          return { hitId: id, hitBounds: b, worldPoint };
+        }
+      }
+
+      // 4. Check mounted DOM island bounding rects as final fallback
+      if (Number.isFinite(clientX) && Number.isFinite(clientY) && typeof s.surface.element.querySelectorAll === 'function') {
+        const islands = s.surface.element.querySelectorAll('[data-entity-id]');
+        for (const node of islands) {
+          const id = node.getAttribute?.('data-entity-id') ?? node.dataset?.entityId;
+          if (!id || !context.world.getCanonical?.(id, CHART_ASPECT_ID)) continue;
+          const rect = node.getBoundingClientRect?.();
+          if (
+            rect
+            && rect.width > 0
+            && rect.height > 0
+            && clientX >= rect.left
+            && clientX <= rect.right
+            && clientY >= rect.top
+            && clientY <= rect.bottom
+          ) {
+            return {
+              hitId: id,
+              hitBounds: getChartWorldBounds(context.world, id),
+              worldPoint,
+            };
+          }
+        }
+      }
+
+      return { hitId: null, hitBounds: null, worldPoint };
+    }
+
+    function tryOpenAtPoint(clientX, clientY, candidateTargets, sourceEvent) {
+      if (composing) return false;
+      for (const t of candidateTargets) {
+        if (t && container.contains?.(t)) return false;
+      }
+
+      const { hitId, hitBounds, worldPoint } = resolveChartEntityAtPoint(clientX, clientY, candidateTargets);
+      if (!hitId) return false;
+      const props = context.world.getCanonical?.(hitId, CHART_ASPECT_ID);
+      if (!props) return false;
+
+      const islandEl = findIslandElement(s.surface.element, hitId);
+      const hit = resolveHitTargetInIsland(
+        islandEl,
+        clientX,
+        clientY,
+        candidateTargets,
+        props,
+        hitBounds,
+        worldPoint,
+      );
+      if (!hit || !hit.target) return false;
+
+      sourceEvent?.preventDefault?.();
+      sourceEvent?.stopPropagation?.();
+      return startEditing(hitId, hit.target, hit.anchorEl);
+    }
+
+    const locked = e => Boolean(composing || e?.isComposing || e?.keyCode === 229);
 
     const onCompositionStart = () => {
       composing = true;
@@ -1074,7 +1265,6 @@ export function mountInlineEditor(context) {
 
     const onCompositionEnd = () => {
       composing = false;
-      until = Date.now() + 16;
       if (session) {
         applyDraftValue(input.value);
         positionEditor();
@@ -1110,75 +1300,96 @@ export function mountInlineEditor(context) {
 
     const onBlur = () => {
       if (composing) return;
+      if (Date.now() - lastOpenedAt < 80) return;
       finish(true);
+    };
+
+    const onPointerDown = e => {
+      if (e.button !== undefined && e.button !== 0) return;
+      if (e.target && container.contains?.(e.target)) return;
+      if (session && !composing) {
+        finish(true);
+      }
+      downState = {
+        pointerId: e.pointerId,
+        x: e.clientX,
+        y: e.clientY,
+        target: e.target,
+        time: Date.now(),
+      };
+    };
+
+    const onPointerUp = e => {
+      if (!downState || (e.pointerId !== undefined && downState.pointerId !== e.pointerId)) return;
+      const currentDown = downState;
+      downState = null;
+      if (e.button !== undefined && e.button !== 0) return;
+
+      const moved = Number.isFinite(e.clientX) && Number.isFinite(currentDown.x)
+        ? Math.hypot(e.clientX - currentDown.x, e.clientY - currentDown.y)
+        : 0;
+      if (moved > 6) {
+        lastTap = null;
+        return;
+      }
+
+      const now = Date.now();
+      const prevTap = lastTap;
+      if (
+        prevTap
+        && now - prevTap.time <= 380
+        && (!Number.isFinite(e.clientX) || Math.hypot(e.clientX - prevTap.x, e.clientY - prevTap.y) <= 8)
+      ) {
+        lastTap = null;
+        const cx = e.clientX;
+        const cy = e.clientY;
+        const targets = [currentDown.target, prevTap.target, e.target].filter(Boolean);
+        // Run after select-suite finishes releasing pointer capture on pointerup
+        queueMicrotask(() => {
+          if (Date.now() - lastOpenedAt < 200) return;
+          tryOpenAtPoint(cx, cy, targets, null);
+        });
+        return;
+      }
+
+      lastTap = {
+        time: now,
+        x: e.clientX,
+        y: e.clientY,
+        target: currentDown.target ?? e.target,
+      };
     };
 
     const onDoubleClick = e => {
       if (e.defaultPrevented || composing) return;
-
-      const worldPoint = { x: 0, y: 0 };
-      if (Number.isFinite(e.clientX) && Number.isFinite(e.clientY) && s.host?.screenToWorld) {
-        s.host.screenToWorld(e.clientX, e.clientY, worldPoint);
+      if (e.button !== undefined && e.button !== 0) return;
+      if (session && Date.now() - lastOpenedAt < 250) {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        input.focus?.();
+        return;
       }
-
-      let hitId = null;
-      let hitBounds = null;
-      const targetEl = e.target && typeof e.target.closest === 'function'
-        ? e.target.closest('[data-entity-id]')
-        : null;
-      const domEntityId = targetEl?.getAttribute?.('data-entity-id') ?? targetEl?.dataset?.entityId;
-      if (domEntityId && context.world.getCanonical?.(domEntityId, CHART_ASPECT_ID)) {
-        hitId = domEntityId;
-        hitBounds = context.world.getComputed?.(domEntityId);
-      }
-
-      if (!hitId) {
-        const selected = s.selection?.getSelection?.() ?? [];
-        const ids = [
-          ...selected,
-          ...(context.world.listEntityIds?.() ?? []),
-        ];
-        const visited = new Set();
-        for (const id of ids) {
-          if (visited.has(id)) continue;
-          visited.add(id);
-          if (!context.world.getCanonical?.(id, CHART_ASPECT_ID)) continue;
-          const b = context.world.getComputed?.(id);
-          if (
-            b
-            && worldPoint.x >= b.x
-            && worldPoint.x <= b.x + b.width
-            && worldPoint.y >= b.y
-            && worldPoint.y <= b.y + b.height
-          ) {
-            hitId = id;
-            hitBounds = b;
-            break;
-          }
-        }
-      }
-
-      if (!hitId) return;
-      const props = context.world.getCanonical?.(hitId, CHART_ASPECT_ID);
-      if (!props) return;
-
-      const islandEl = findIslandElement(s.surface.element, hitId);
-      const hit = resolveHitTargetInIsland(
-        islandEl,
-        e.clientX,
-        e.clientY,
-        e.target,
-        props,
-        hitBounds,
-        worldPoint,
-      );
-
-      e.preventDefault?.();
-      e.stopPropagation?.();
-      startEditing(hitId, hit.target, hit.anchorEl);
+      const now = Date.now();
+      const recentTapTarget =
+        lastTap
+        && now - lastTap.time <= 400
+        && (!Number.isFinite(e.clientX) || Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) <= 8)
+          ? lastTap.target
+          : null;
+      const recentDownTarget =
+        downState
+        && now - downState.time <= 400
+        && (!Number.isFinite(e.clientX) || Math.hypot(e.clientX - downState.x, e.clientY - downState.y) <= 8)
+          ? downState.target
+          : null;
+      lastTap = null;
+      downState = null;
+      const targets = [e.target, recentDownTarget, recentTapTarget].filter(Boolean);
+      tryOpenAtPoint(e.clientX, e.clientY, targets, e);
     };
 
     const offFrame = frames?.subscribe?.(() => {
+      mount();
       if (session) positionEditor();
     }) ?? (() => {});
 
@@ -1187,7 +1398,9 @@ export function mountInlineEditor(context) {
     input.addEventListener('input', onInput);
     input.addEventListener('keydown', onKeyDown);
     input.addEventListener('blur', onBlur);
-    s.surface.element.addEventListener('dblclick', onDoubleClick);
+    s.surface.element.addEventListener('pointerdown', onPointerDown, true);
+    s.surface.element.addEventListener('pointerup', onPointerUp, true);
+    s.surface.element.addEventListener('dblclick', onDoubleClick, true);
 
     closeCurrent = () => finish(true);
     openCurrent = (entityId, field = 'title') => {
@@ -1201,14 +1414,17 @@ export function mountInlineEditor(context) {
     detachCurrent = () => {
       offFrame();
       offWorld();
-      const islandEl = session ? findIslandElement(s.surface.element, session.id) : null;
-      restoreHiddenElements(islandEl);
+      if (session) {
+        restoreHiddenElements(session.id);
+      }
       input.removeEventListener('compositionstart', onCompositionStart);
       input.removeEventListener('compositionend', onCompositionEnd);
       input.removeEventListener('input', onInput);
       input.removeEventListener('keydown', onKeyDown);
       input.removeEventListener('blur', onBlur);
-      s.surface.element.removeEventListener('dblclick', onDoubleClick);
+      s.surface.element.removeEventListener('pointerdown', onPointerDown, true);
+      s.surface.element.removeEventListener('pointerup', onPointerUp, true);
+      s.surface.element.removeEventListener('dblclick', onDoubleClick, true);
       container.remove();
     };
   }
@@ -1218,6 +1434,7 @@ export function mountInlineEditor(context) {
 
   return {
     open(entityId, field = 'title') {
+      mount();
       return openCurrent(entityId, field);
     },
     close() {
@@ -1227,6 +1444,7 @@ export function mountInlineEditor(context) {
       offSurface();
       closeCurrent();
       detachCurrent();
+      mountedSurfaceEl = null;
     },
   };
 }
