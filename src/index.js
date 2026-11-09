@@ -39,13 +39,6 @@ const CHART_ICON = Object.freeze({
   ]),
 });
 
-const EDIT_ICON = Object.freeze({
-  paths: Object.freeze([
-    'M4 14 14 4l3 3L7 17H4z',
-    'M12 6l3 3',
-  ]),
-});
-
 const COMMAND_LABELS = Object.freeze({
   'insert-chart': 'ZTD 차트 추가',
   'edit-chart': '차트 텍스트 인라인 편집',
@@ -99,15 +92,6 @@ export const ztdChartAspect = Object.freeze({
           { label: '라이트', value: 'light' },
           { label: '다크', value: 'dark' },
         ],
-      },
-      {
-        id: 'ztd-charts.edit.selection',
-        kind: 'action',
-        label: '텍스트 편집',
-        icon: EDIT_ICON,
-        commandSymbol: `${EXTENSION_ID}:edit-chart`,
-        placement: 'selection-bar',
-        requiresSelection: true,
       },
       {
         id: 'ztd-charts.suggest.selection',

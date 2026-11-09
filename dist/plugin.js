@@ -4,7 +4,7 @@ import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 var extension_default = {
 	id: "diagram.ztd-charts",
 	title: "ZTD 차트",
-	version: "0.1.1",
+	version: "0.1.2",
 	summary: "36종의 zero-dependency 통계·비즈니스 차트를 캔버스 도형, 정적 SVG, 데이터 스튜디오 패널 및 코파일럿 도구로 제공하는 확장",
 	engine: "^0.1.1",
 	dependencies: {},
@@ -22917,14 +22917,14 @@ function resolveChartTheme(theme = "light", accentColor = "#3182f6") {
 	}, baseTheme);
 	return baseTheme;
 }
-function isPlainRecord(value) {
+function isPlainRecord$1(value) {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function cloneJsonRows(rows) {
 	if (!Array.isArray(rows)) return [];
 	const cleaned = [];
 	for (const item of rows) {
-		if (!isPlainRecord(item)) continue;
+		if (!isPlainRecord$1(item)) continue;
 		const row = {};
 		for (const [k, v] of Object.entries(item)) if (typeof v === "string" || typeof v === "number" || typeof v === "boolean" || v === null) row[k] = v;
 		if (Object.keys(row).length > 0) cleaned.push(row);
@@ -23043,8 +23043,9 @@ function resolveChartSpec(rawProps = {}) {
 	const def = getLocalizedChartDef(chartType, lang);
 	const example = def.example;
 	const customRows = cloneJsonRows(rawProps.data);
-	const customEncoding = isPlainRecord(rawProps.encoding) ? { ...rawProps.encoding } : {};
-	const customOptions = isPlainRecord(rawProps.options) ? { ...rawProps.options } : {};
+	const customEncoding = isPlainRecord$1(rawProps.encoding) ? { ...rawProps.encoding } : {};
+	const customOptions = isPlainRecord$1(rawProps.options) ? { ...rawProps.options } : {};
+	const textOverrides = isPlainRecord$1(customOptions.textOverrides) ? { ...customOptions.textOverrides } : {};
 	let effectiveRows = example.data;
 	let effectiveEncoding = { ...example.encoding ?? {} };
 	let effectiveOptions = {
@@ -23080,15 +23081,19 @@ function resolveChartSpec(rawProps = {}) {
 			}
 		}
 	}
-	const title = typeof rawProps.title === "string" && rawProps.title.trim() ? rawProps.title.trim() : example.card?.title ?? def.name ?? chartType;
-	const subtitle = typeof rawProps.subtitle === "string" && rawProps.subtitle.trim() ? rawProps.subtitle.trim() : example.card?.subtitle ?? "";
-	const takeaway = typeof rawProps.takeaway === "string" && rawProps.takeaway.trim() ? rawProps.takeaway.trim() : usingSampleData ? example.card?.takeaway ?? "" : "";
+	const title = textOverrides["field:title"] !== void 0 ? String(textOverrides["field:title"]) : typeof rawProps.title === "string" && rawProps.title.length > 0 ? rawProps.title : example.card?.title ?? def.name ?? chartType;
+	const subtitle = textOverrides["field:subtitle"] !== void 0 ? String(textOverrides["field:subtitle"]) : typeof rawProps.subtitle === "string" && rawProps.subtitle.length > 0 ? rawProps.subtitle : example.card?.subtitle ?? "";
+	const takeaway = textOverrides["field:takeaway"] !== void 0 ? String(textOverrides["field:takeaway"]) : typeof rawProps.takeaway === "string" && rawProps.takeaway.length > 0 ? rawProps.takeaway : usingSampleData ? example.card?.takeaway ?? "" : "";
+	const cardNumber = textOverrides["field:cardNumber"] !== void 0 ? String(textOverrides["field:cardNumber"]) : customOptions.cardNumber !== void 0 ? String(customOptions.cardNumber) : example.card?.number !== void 0 ? String(example.card.number) : "";
+	const cardLevel = textOverrides["field:cardLevel"] !== void 0 ? String(textOverrides["field:cardLevel"]) : customOptions.cardLevel !== void 0 ? String(customOptions.cardLevel) : example.card?.level !== void 0 ? String(example.card.level) : "";
 	const cardLegend = legendMode === "false" ? false : "auto";
 	const card = variant === "card" ? {
 		...example.card ?? {},
+		number: cardNumber || void 0,
 		title,
 		subtitle: subtitle || void 0,
 		takeaway: takeaway || void 0,
+		level: cardLevel ? example.card?.level ?? "기본" : void 0,
 		legend: cardLegend,
 		replay: false
 	} : void 0;
@@ -23102,7 +23107,14 @@ function resolveChartSpec(rawProps = {}) {
 	let legendItems = [];
 	if (variant === "card" && legendMode !== "false") try {
 		const computed = autoLegend(spec, effectiveRows, localeTag);
-		if (Array.isArray(computed)) legendItems = computed;
+		if (Array.isArray(computed)) legendItems = computed.map((item, idx) => {
+			const baseLabel = String(item?.label ?? "");
+			const override = textOverrides[`legend:${idx}`] ?? textOverrides[`text:${baseLabel}`];
+			return override !== void 0 ? {
+				...item,
+				label: String(override)
+			} : item;
+		});
 	} catch {
 		legendItems = [];
 	}
@@ -23118,6 +23130,9 @@ function resolveChartSpec(rawProps = {}) {
 		title,
 		subtitle,
 		takeaway,
+		cardNumber,
+		cardLevel,
+		textOverrides,
 		usingSampleData,
 		spec,
 		bareSpec: {
@@ -23163,7 +23178,7 @@ function parseDataInput(input, fallbackLocale = "ko") {
 			format: "array"
 		};
 	}
-	if (isPlainRecord(input)) {
+	if (isPlainRecord$1(input)) {
 		if (Array.isArray(input.data)) {
 			const rows = normalizeData(input.data);
 			return {
@@ -23171,8 +23186,8 @@ function parseDataInput(input, fallbackLocale = "ko") {
 				rows,
 				format: "spec",
 				chartType: input.type ? normalizeChartType(input.type) : void 0,
-				encoding: isPlainRecord(input.encoding) ? input.encoding : void 0,
-				options: isPlainRecord(input.options) ? input.options : void 0,
+				encoding: isPlainRecord$1(input.encoding) ? input.encoding : void 0,
+				options: isPlainRecord$1(input.options) ? input.options : void 0,
 				title: input.card?.title ?? input.title,
 				subtitle: input.card?.subtitle ?? input.subtitle,
 				takeaway: input.card?.takeaway ?? input.takeaway
@@ -23457,18 +23472,32 @@ function inlineZtdCssVariables(svgMarkup, resolvedTheme) {
 		return fallback ? String(fallback).trim() : "#64748b";
 	});
 }
+function unescapeXml(value) {
+	return String(value ?? "").replace(/&quot;/g, "\"").replace(/&apos;/g, "'").replace(/&gt;/g, ">").replace(/&lt;/g, "<").replace(/&amp;/g, "&");
+}
+function applySvgTextOverrides(svgContent, textOverrides) {
+	if (!svgContent) return "";
+	let idx = 0;
+	return svgContent.replace(/<text\b([^>]*)>([\s\S]*?)<\/text>/gi, (_full, attrs, inner) => {
+		const slotKey = `svg:${idx++}`;
+		const plainBase = unescapeXml(inner.replace(/<[^>]+>/g, "")).trim();
+		const override = textOverrides?.[slotKey] ?? (plainBase ? textOverrides?.[`text:${plainBase}`] : void 0);
+		return `<text data-chart-text-slot="${slotKey}"${attrs}>${override !== void 0 ? escapeXml(String(override)) : inner}</text>`;
+	});
+}
 function renderLegendSvg(legendItems, maxWidth, yOffset, resolvedTheme) {
 	if (!Array.isArray(legendItems) || legendItems.length === 0) return "";
 	let cursorX = 0;
 	const parts = [];
-	for (const item of legendItems.slice(0, 6)) {
+	for (let idx = 0; idx < Math.min(legendItems.length, 6); idx++) {
+		const item = legendItems[idx];
 		const label = String(item?.label ?? "");
 		if (!label) continue;
 		const itemWidth = Math.ceil(textWidth(label, 11) + 22);
 		if (cursorX > 0 && cursorX + itemWidth > maxWidth) break;
 		const rawColor = item?.color || resolvedTheme.accent;
 		const swatchColor = inlineZtdCssVariables(String(rawColor), resolvedTheme);
-		parts.push(`<g transform="translate(${cursorX},${yOffset})"><rect x="0" y="2" width="9" height="9" rx="2.5" fill="${escapeXml(swatchColor)}"/><text x="14" y="10" font-size="11" font-weight="500" fill="${escapeXml(resolvedTheme.muted)}">${escapeXml(label)}</text></g>`);
+		parts.push(`<g transform="translate(${cursorX},${yOffset})"><rect x="0" y="2" width="9" height="9" rx="2.5" fill="${escapeXml(swatchColor)}"/><text data-chart-text-slot="legend:${idx}" x="14" y="10" font-size="11" font-weight="500" fill="${escapeXml(resolvedTheme.muted)}">${escapeXml(label)}</text></g>`);
 		cursorX += itemWidth;
 	}
 	return parts.join("");
@@ -23490,7 +23519,7 @@ function renderChartSvg(props, derived, entityId = "chart") {
 	const y = Number.isFinite(geom.y) ? geom.y : 0;
 	const rotationDeg = Number.isFinite(geom.rotation) ? geom.rotation * 180 / Math.PI : 0;
 	const resolved = resolveChartSpec(props);
-	const { bareSpec, resolvedTheme, localeTag, variant, title, subtitle, takeaway, legendItems } = resolved;
+	const { bareSpec, resolvedTheme, localeTag, variant, title, subtitle, takeaway, textOverrides, legendItems } = resolved;
 	const padX = variant === "card" ? 20 : 12;
 	const padTop = variant === "card" ? 18 : 12;
 	const padBottom = variant === "card" ? 16 : 12;
@@ -23512,7 +23541,7 @@ function renderChartSvg(props, derived, entityId = "chart") {
 		locale: localeTag
 	})), `ztd-${safeId}`).match(/<svg([^>]*)>([\s\S]*?)<\/svg>/i);
 	const viewBox = (svgMatch?.[1]?.match(/viewBox="([^"]+)"/i))?.[1] ?? `0 0 ${plotWidth} ${plotHeight}`;
-	const innerPlotSvg = svgMatch?.[2] ? inlineZtdCssVariables(svgMatch[2], resolvedTheme) : "";
+	const innerPlotSvg = svgMatch?.[2] ? applySvgTextOverrides(inlineZtdCssVariables(svgMatch[2], resolvedTheme), textOverrides) : "";
 	const clipId = `ztd-card-clip-${safeId}`;
 	const transformAttr = rotationDeg !== 0 ? `translate(${x},${y}) rotate(${rotationDeg},${width / 2},${height / 2})` : `translate(${x},${y})`;
 	let headerSvg = "";
@@ -23549,32 +23578,94 @@ function ensureDocumentBaseCss(doc) {
 			style.textContent = [
 				baseCss,
 				"[data-role=\"ztd-chart-mount\"] .ztd-card { height: 100%; box-sizing: border-box; margin: 0; }",
-				"[data-role=\"ztd-chart-mount\"] [data-chart-field], [data-role=\"ztd-chart-mount\"] svg text { cursor: text; }"
+				"[data-role=\"ztd-chart-mount\"] [data-chart-field], [data-role=\"ztd-chart-mount\"] [data-chart-text-slot], [data-role=\"ztd-chart-mount\"] svg text, [data-role=\"ztd-chart-mount\"] svg tspan { pointer-events: auto !important; cursor: text !important; }",
+				"input[data-ztd-chart-editor=\"true\"], input[data-ztd-chart-editor=\"true\"]:focus, input[data-ztd-chart-editor=\"true\"]:focus-visible { background: transparent !important; border: none !important; outline: none !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; }"
 			].join("\n");
 			(doc.head ?? doc.documentElement)?.appendChild?.(style);
 		}
 		injectedDocs.add(doc);
 	} catch {}
 }
-function ChartIslandContent({ activeSpec, variant, plotWidth, plotHeight, localeTag }) {
+function applySlotOverride(el, slotKey, textOverrides) {
+	if (!el) return;
+	const currentText = el.textContent ?? "";
+	if (el.dataset.baseText === void 0 || el.dataset.appliedOverride !== void 0 && currentText !== el.dataset.appliedOverride) el.dataset.baseText = currentText;
+	const baseText = (el.dataset.baseText ?? "").trim();
+	const override = textOverrides?.[slotKey] ?? (baseText ? textOverrides?.[`text:${baseText}`] : void 0);
+	if (override !== void 0) {
+		const nextStr = String(override);
+		el.dataset.appliedOverride = nextStr;
+		if (el.textContent !== nextStr) el.textContent = nextStr;
+	} else if (el.dataset.appliedOverride !== void 0) {
+		el.textContent = el.dataset.baseText ?? "";
+		delete el.dataset.appliedOverride;
+	}
+}
+function ChartIslandContent({ activeSpec, variant, plotWidth, plotHeight, localeTag, textOverrides, cardLevel, hostEl }) {
 	const wrapRef = React.useRef(null);
 	React.useLayoutEffect(() => {
 		const root = wrapRef.current;
 		if (!root || typeof root.querySelector !== "function") return;
+		const headerRows = root.querySelectorAll?.(".ztd-card > header > div") ?? [];
+		const firstHeaderRow = headerRows[0];
 		const titleEl = root.querySelector(".ztd-card > header h1, .ztd-card > header h2, .ztd-card > header h3");
 		if (titleEl) {
 			titleEl.dataset.chartField = "title";
-			titleEl.title = "더블클릭하여 제목 편집";
+			titleEl.dataset.chartTextSlot = "field:title";
 		}
-		const subtitleEl = root.querySelectorAll(".ztd-card > header > div")?.[1]?.querySelector?.("span:first-child");
-		if (subtitleEl && activeSpec?.card?.subtitle) {
+		if (firstHeaderRow) {
+			const firstSpan = firstHeaderRow.querySelector?.("span:first-child");
+			if (firstSpan && firstSpan !== titleEl) {
+				firstSpan.dataset.chartField = "cardNumber";
+				firstSpan.dataset.chartTextSlot = "field:cardNumber";
+			}
+		}
+		const subtitleEl = headerRows[1]?.querySelector?.("span:first-child");
+		if (subtitleEl && !subtitleEl.closest?.("ul")) {
 			subtitleEl.dataset.chartField = "subtitle";
-			subtitleEl.title = "더블클릭하여 부제목 편집";
+			subtitleEl.dataset.chartTextSlot = "field:subtitle";
+		}
+		const legendItems = root.querySelectorAll?.(".ztd-card > header ul > li") ?? [];
+		for (let i = 0; i < legendItems.length; i++) {
+			const spans = legendItems[i].querySelectorAll?.("span") ?? [];
+			const labelSpan = spans.length > 0 ? spans[spans.length - 1] : null;
+			if (labelSpan && labelSpan.getAttribute?.("aria-hidden") !== "true") {
+				const slotKey = `legend:${i}`;
+				labelSpan.dataset.chartTextSlot = slotKey;
+				applySlotOverride(labelSpan, slotKey, textOverrides);
+			}
 		}
 		const takeawayEl = root.querySelector(".ztd-card > footer > span:first-child");
-		if (takeawayEl && activeSpec?.card?.takeaway) {
+		if (takeawayEl) {
 			takeawayEl.dataset.chartField = "takeaway";
-			takeawayEl.title = "더블클릭하여 핵심 요약 편집";
+			takeawayEl.dataset.chartTextSlot = "field:takeaway";
+		}
+		const footerRightSpans = root.querySelectorAll?.(".ztd-card > footer > span:nth-child(2) > span") ?? [];
+		const levelEl = footerRightSpans.length > 0 ? footerRightSpans[footerRightSpans.length - 1] : null;
+		if (levelEl) {
+			levelEl.dataset.chartField = "cardLevel";
+			levelEl.dataset.chartTextSlot = "field:cardLevel";
+			if (cardLevel !== void 0 && cardLevel !== "") levelEl.textContent = String(cardLevel);
+		}
+		const svgTexts = root.querySelectorAll?.("svg text") ?? [];
+		for (let i = 0; i < svgTexts.length; i++) {
+			const textEl = svgTexts[i];
+			const slotKey = `svg:${i}`;
+			textEl.dataset.chartTextSlot = slotKey;
+			if (textEl.style) {
+				textEl.style.pointerEvents = "auto";
+				textEl.style.cursor = "text";
+			}
+			applySlotOverride(textEl, slotKey, textOverrides);
+		}
+		const activeSlot = (hostEl?.closest?.("[data-entity-id]") ?? hostEl)?.__ztdActiveEditSlot ?? hostEl?.__ztdActiveEditSlot ?? null;
+		const allSlots = root.querySelectorAll?.("[data-chart-text-slot], [data-chart-field]") ?? [];
+		for (const el of allSlots) if (Boolean(activeSlot && (el.dataset?.chartTextSlot === activeSlot || `field:${el.dataset?.chartField}` === activeSlot || el.dataset?.chartField === activeSlot))) {
+			if (el.style) el.style.opacity = "0";
+			if (el.dataset) el.dataset.hiddenByEditor = "true";
+		} else if (el.dataset?.hiddenByEditor === "true") {
+			if (el.style) el.style.opacity = "";
+			delete el.dataset.hiddenByEditor;
 		}
 	});
 	return React.createElement("div", {
@@ -23613,7 +23704,7 @@ function renderChartDom(hostEl, props, derived, entityId = "chart") {
 	const width = Math.max(120, Math.round(Number.isFinite(geom.width) ? geom.width : 480));
 	const height = Math.max(100, Math.round(Number.isFinite(geom.height) ? geom.height : 340));
 	const resolved = resolveChartSpec(props);
-	const { spec, bareSpec, resolvedTheme, localeTag, variant, chartType, themeName, title, legendItems } = resolved;
+	const { spec, bareSpec, resolvedTheme, localeTag, variant, chartType, themeName, title, cardLevel, textOverrides, legendItems } = resolved;
 	if (hostEl.dataset) {
 		hostEl.dataset.chartType = chartType;
 		hostEl.dataset.chartTheme = themeName;
@@ -23660,7 +23751,10 @@ function renderChartDom(hostEl, props, derived, entityId = "chart") {
 		variant,
 		plotWidth,
 		plotHeight,
-		localeTag
+		localeTag,
+		textOverrides,
+		cardLevel,
+		hostEl
 	}));
 	const renderGen = ++entry.gen;
 	entry.root.render(element);
@@ -23755,13 +23849,10 @@ Object.freeze(createPackageManifest(extension_default));
 var CARD_FIELDS = Object.freeze([
 	"title",
 	"subtitle",
-	"takeaway"
+	"takeaway",
+	"cardNumber",
+	"cardLevel"
 ]);
-var FIELD_LABELS = Object.freeze({
-	title: "차트 제목",
-	subtitle: "차트 부제목·단위",
-	takeaway: "핵심 요약 (Takeaway)"
-});
 /**
 * Merges a local draft with concurrent remote updates so changes outside
 * the locally edited span survive remote updates during IME composition.
@@ -23786,11 +23877,11 @@ function mergeDraft(base, local, remote) {
 	return remote.slice(0, Math.min(a, r)) + remote.slice(r, remote.length - t) + insert + remote.slice(Math.max(remoteEnd, end) + delta);
 }
 /**
-* Parses a displayed numeric label (e.g. "1,240", "42.5%", "+18", "₩3,200") into a finite number.
+* Parses a displayed numeric label (e.g. "1,240", "42.5%", "+18", "−380", "₩3,200") into a finite number.
 */
 function parseDisplayedNumber(text) {
 	if (typeof text !== "string") return null;
-	const cleaned = text.trim().replace(/[,%\s₩$€¥£원건명개점]/g, "").replace(/^[+]/, "");
+	const cleaned = text.trim().replace(/−/g, "-").replace(/[,%\s₩$€¥£원건명개점]/g, "").replace(/^[+]/, "");
 	if (!cleaned || !/^-?\d+(?:\.\d+)?$/.test(cleaned)) return null;
 	const num = Number(cleaned);
 	return Number.isFinite(num) ? num : null;
@@ -23819,8 +23910,7 @@ function matchTextToChartData(rawText, rows, localeTag = "ko-KR") {
 			colKey: first.colKey,
 			rowIndex: first.rowIndex,
 			matches: stringMatches,
-			initialValue: String(rows[first.rowIndex][first.colKey] ?? trimmed),
-			label: `데이터 라벨 (${first.colKey})`
+			initialValue: String(rows[first.rowIndex][first.colKey] ?? trimmed)
 		};
 	}
 	const parsedNum = parseDisplayedNumber(trimmed);
@@ -23846,18 +23936,24 @@ function matchTextToChartData(rawText, rows, localeTag = "ko-KR") {
 				colKey: first.colKey,
 				rowIndex: first.rowIndex,
 				matches: [first],
-				initialValue: String(rows[first.rowIndex][first.colKey]),
-				label: `데이터 값 (${first.colKey})`
+				initialValue: String(rows[first.rowIndex][first.colKey])
 			};
 		}
 	}
 	return null;
 }
+function isPlainRecord(value) {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 function readTargetValue(props, target) {
 	if (!props || !target) return "";
 	const resolved = resolveChartSpec(props);
+	const textOverrides = resolved.textOverrides ?? {};
+	if (target.slotKey && textOverrides[target.slotKey] !== void 0) return String(textOverrides[target.slotKey]);
 	if (target.kind === "field") {
 		const field = target.field;
+		if (field === "cardNumber") return String(resolved.cardNumber ?? "");
+		if (field === "cardLevel") return String(resolved.cardLevel ?? "");
 		const raw = props[field];
 		if (typeof raw === "string" && raw.length > 0) return raw;
 		return String(resolved[field] ?? "");
@@ -23868,40 +23964,136 @@ function readTargetValue(props, target) {
 		const val = row[target.colKey];
 		return val !== void 0 && val !== null ? String(val) : "";
 	}
+	if (target.kind === "override") {
+		if (target.baseText && textOverrides[`text:${target.baseText}`] !== void 0) return String(textOverrides[`text:${target.baseText}`]);
+		return String(target.initialValue ?? target.baseText ?? "");
+	}
 	return "";
 }
 function buildPatchForTarget(props, target, rawValue) {
 	if (!props || !target) return null;
 	const resolved = resolveChartSpec(props);
+	const prevOptions = isPlainRecord(props.options) ? { ...props.options } : {};
+	const prevOverrides = isPlainRecord(prevOptions.textOverrides) ? { ...prevOptions.textOverrides } : {};
 	if (target.kind === "field") {
-		if (rawValue === readTargetValue(props, target) && props[target.field] === rawValue) return null;
-		return { [target.field]: rawValue };
+		const field = target.field;
+		if (rawValue === readTargetValue(props, target) && (field === "cardNumber" || field === "cardLevel" || props[field] === rawValue)) return null;
+		if (field === "cardNumber") return { options: {
+			...prevOptions,
+			cardNumber: rawValue,
+			textOverrides: {
+				...prevOverrides,
+				"field:cardNumber": rawValue
+			}
+		} };
+		if (field === "cardLevel") return { options: {
+			...prevOptions,
+			cardLevel: rawValue,
+			textOverrides: {
+				...prevOverrides,
+				"field:cardLevel": rawValue
+			}
+		} };
+		const nextOverrides = { ...prevOverrides };
+		if (rawValue === "") nextOverrides[`field:${field}`] = "";
+		else delete nextOverrides[`field:${field}`];
+		return {
+			[field]: rawValue,
+			options: {
+				...prevOptions,
+				textOverrides: nextOverrides
+			}
+		};
 	}
 	if (target.kind === "data") {
 		const sourceRows = resolved.spec.data ?? [];
-		if (sourceRows.length === 0) return null;
 		const nextRows = sourceRows.map((row) => ({ ...row }));
-		let changed = false;
+		const nextOptions = { ...prevOptions };
+		const nextOverrides = { ...prevOverrides };
 		if (target.cellKind === "number") {
 			const num = parseDisplayedNumber(rawValue);
-			if (num === null) return null;
-			for (const m of target.matches) if (nextRows[m.rowIndex] && nextRows[m.rowIndex][m.colKey] !== num) {
-				nextRows[m.rowIndex][m.colKey] = num;
-				changed = true;
+			if (num !== null && sourceRows.length > 0) {
+				let changed = false;
+				for (const m of target.matches) if (nextRows[m.rowIndex] && nextRows[m.rowIndex][m.colKey] !== num) {
+					nextRows[m.rowIndex][m.colKey] = num;
+					changed = true;
+				}
+				if (target.slotKey && nextOverrides[target.slotKey] !== void 0) {
+					delete nextOverrides[target.slotKey];
+					changed = true;
+				}
+				if (!changed) return null;
+				return {
+					data: nextRows,
+					encoding: { ...resolved.spec.encoding ?? {} },
+					options: {
+						...nextOptions,
+						textOverrides: nextOverrides
+					}
+				};
 			}
-		} else {
-			const nextText = rawValue;
-			if (!nextText.trim()) return null;
-			for (const m of target.matches) if (nextRows[m.rowIndex] && nextRows[m.rowIndex][m.colKey] !== nextText) {
-				nextRows[m.rowIndex][m.colKey] = nextText;
-				changed = true;
-			}
+			const slotKey = target.slotKey || `text:${target.baseText || target.initialValue}`;
+			if (nextOverrides[slotKey] === rawValue) return null;
+			nextOverrides[slotKey] = rawValue;
+			return { options: {
+				...nextOptions,
+				textOverrides: nextOverrides
+			} };
 		}
-		if (!changed) return null;
-		return {
-			data: nextRows,
-			encoding: { ...resolved.spec.encoding ?? {} }
-		};
+		if (rawValue.trim().length > 0 && sourceRows.length > 0) {
+			let changed = false;
+			const oldCellVal = String(sourceRows[target.rowIndex]?.[target.colKey] ?? "");
+			for (const m of target.matches) if (nextRows[m.rowIndex] && nextRows[m.rowIndex][m.colKey] !== rawValue) {
+				nextRows[m.rowIndex][m.colKey] = rawValue;
+				changed = true;
+			}
+			if (oldCellVal && nextOptions.highlight === oldCellVal) {
+				nextOptions.highlight = rawValue;
+				changed = true;
+			}
+			if (target.slotKey && nextOverrides[target.slotKey] !== void 0) {
+				delete nextOverrides[target.slotKey];
+				changed = true;
+			}
+			if (oldCellVal && nextOverrides[`text:${oldCellVal}`] !== void 0) {
+				delete nextOverrides[`text:${oldCellVal}`];
+				changed = true;
+			}
+			if (!changed) return null;
+			return {
+				data: nextRows,
+				encoding: { ...resolved.spec.encoding ?? {} },
+				options: {
+					...nextOptions,
+					textOverrides: nextOverrides
+				}
+			};
+		}
+		const slotKey = target.slotKey || `text:${target.baseText || target.initialValue}`;
+		if (nextOverrides[slotKey] === rawValue) return null;
+		nextOverrides[slotKey] = rawValue;
+		return { options: {
+			...nextOptions,
+			textOverrides: nextOverrides
+		} };
+	}
+	if (target.kind === "override") {
+		const slotKey = target.slotKey || `text:${target.baseText || target.initialValue}`;
+		const nextOptions = { ...prevOptions };
+		const nextOverrides = { ...prevOverrides };
+		for (const optKey of [
+			"centerLabel",
+			"label",
+			"xLabel",
+			"yLabel",
+			"note"
+		]) if (typeof resolved.spec?.options?.[optKey] === "string" && resolved.spec.options[optKey].trim() === (target.baseText ?? "").trim()) nextOptions[optKey] = rawValue;
+		if (nextOverrides[slotKey] === rawValue) return null;
+		nextOverrides[slotKey] = rawValue;
+		return { options: {
+			...nextOptions,
+			textOverrides: nextOverrides
+		} };
 	}
 	return null;
 }
@@ -23914,13 +24106,185 @@ function findFieldElementInIsland(islandEl, field) {
 	const tagged = islandEl.querySelector(`[data-chart-field="${field}"]`);
 	if (tagged) return tagged;
 	if (field === "title") return islandEl.querySelector(".ztd-card > header h1, .ztd-card > header h2, .ztd-card > header h3");
-	if (field === "subtitle") return islandEl.querySelectorAll(".ztd-card > header > div")?.[1]?.querySelector?.("span:first-child") ?? null;
+	if (field === "subtitle") return (islandEl.querySelectorAll?.(".ztd-card > header > div"))?.[1]?.querySelector?.("span:first-child") ?? null;
 	if (field === "takeaway") return islandEl.querySelector(".ztd-card > footer > span:first-child");
+	return null;
+}
+function findSlotElementInIsland(islandEl, target) {
+	if (!islandEl || !target) return null;
+	if (target.slotKey && typeof islandEl.querySelector === "function") {
+		const bySlot = islandEl.querySelector(`[data-chart-text-slot="${target.slotKey}"]`);
+		if (bySlot) return bySlot;
+	}
+	if (target.kind === "field" && target.field) return findFieldElementInIsland(islandEl, target.field);
+	if (target.slotKey?.startsWith("svg:") && typeof islandEl.querySelectorAll === "function") {
+		const idx = Number(target.slotKey.slice(4));
+		const svgTexts = islandEl.querySelectorAll("svg text");
+		if (Number.isInteger(idx) && svgTexts[idx]) return svgTexts[idx];
+	}
+	return null;
+}
+function isScreenReaderOrHidden(el) {
+	let cur = el;
+	while (cur) {
+		if (cur.classList?.contains?.("ztd-sr")) return true;
+		if (cur.getAttribute?.("aria-hidden") === "true") return true;
+		const tag = cur.tagName?.toLowerCase?.();
+		if (tag === "title" || tag === "desc" || tag === "defs") return true;
+		cur = cur.parentElement;
+	}
+	return false;
+}
+function inferSlotKeyForElement(islandEl, el) {
+	if (!el) return null;
+	if (el.dataset?.chartTextSlot) return el.dataset.chartTextSlot;
+	if (el.dataset?.chartField) return `field:${el.dataset.chartField}`;
+	if (el.tagName?.toLowerCase?.() === "text" && islandEl && typeof islandEl.querySelectorAll === "function") {
+		const idx = Array.from(islandEl.querySelectorAll("svg text")).indexOf(el);
+		if (idx >= 0) return `svg:${idx}`;
+	}
+	return null;
+}
+function buildTargetFromElement(islandEl, el, resolved) {
+	if (!el || isScreenReaderOrHidden(el)) return null;
+	const rows = resolved.spec.data ?? [];
+	const fieldEl = el.closest?.("[data-chart-field]") ?? (el.dataset?.chartField ? el : null);
+	if (fieldEl) {
+		const field = fieldEl.getAttribute?.("data-chart-field") ?? fieldEl.dataset?.chartField;
+		if (CARD_FIELDS.includes(field)) return {
+			target: {
+				kind: "field",
+				field,
+				slotKey: `field:${field}`
+			},
+			anchorEl: fieldEl
+		};
+	}
+	const svgTextEl = el.closest?.("svg text") ?? (el.tagName?.toLowerCase?.() === "text" ? el : null);
+	if (svgTextEl && !isScreenReaderOrHidden(svgTextEl)) {
+		const displayedText = (svgTextEl.textContent ?? "").trim();
+		const baseText = (svgTextEl.dataset?.baseText ?? displayedText).trim();
+		const slotKey = inferSlotKeyForElement(islandEl, svgTextEl) || `text:${baseText || displayedText}`;
+		const matched = matchTextToChartData(baseText, rows, resolved.localeTag) ?? matchTextToChartData(displayedText, rows, resolved.localeTag);
+		if (matched) return {
+			target: {
+				...matched,
+				slotKey,
+				baseText: baseText || displayedText,
+				initialValue: matched.cellKind === "number" ? matched.initialValue : displayedText || matched.initialValue
+			},
+			anchorEl: svgTextEl
+		};
+		return {
+			target: {
+				kind: "override",
+				slotKey,
+				baseText: baseText || displayedText,
+				initialValue: displayedText || baseText
+			},
+			anchorEl: svgTextEl
+		};
+	}
+	const slotEl = el.closest?.("[data-chart-text-slot]") ?? (el.dataset?.chartTextSlot ? el : null);
+	if (slotEl && !isScreenReaderOrHidden(slotEl)) {
+		const slotKey = slotEl.getAttribute?.("data-chart-text-slot") ?? slotEl.dataset?.chartTextSlot;
+		if (slotKey?.startsWith("field:")) {
+			const field = slotKey.slice(6);
+			if (CARD_FIELDS.includes(field)) return {
+				target: {
+					kind: "field",
+					field,
+					slotKey
+				},
+				anchorEl: slotEl
+			};
+		}
+		const displayedText = (slotEl.textContent ?? "").trim();
+		const baseText = (slotEl.dataset?.baseText ?? displayedText).trim();
+		const matched = matchTextToChartData(baseText, rows, resolved.localeTag) ?? matchTextToChartData(displayedText, rows, resolved.localeTag);
+		if (matched) return {
+			target: {
+				...matched,
+				slotKey,
+				baseText: baseText || displayedText,
+				initialValue: displayedText || matched.initialValue
+			},
+			anchorEl: slotEl
+		};
+		return {
+			target: {
+				kind: "override",
+				slotKey,
+				baseText: baseText || displayedText,
+				initialValue: displayedText || baseText
+			},
+			anchorEl: slotEl
+		};
+	}
+	const headerTitle = el.closest?.(".ztd-card > header h1, .ztd-card > header h2, .ztd-card > header h3");
+	if (headerTitle) return {
+		target: {
+			kind: "field",
+			field: "title",
+			slotKey: "field:title"
+		},
+		anchorEl: headerTitle
+	};
+	const spanEl = el.closest?.("span");
+	if (spanEl && islandEl?.contains?.(spanEl) && !isScreenReaderOrHidden(spanEl)) {
+		const spanText = (spanEl.textContent ?? "").trim();
+		if (spanText) {
+			if (spanText === resolved.subtitle) return {
+				target: {
+					kind: "field",
+					field: "subtitle",
+					slotKey: "field:subtitle"
+				},
+				anchorEl: spanEl
+			};
+			if (spanText === resolved.takeaway) return {
+				target: {
+					kind: "field",
+					field: "takeaway",
+					slotKey: "field:takeaway"
+				},
+				anchorEl: spanEl
+			};
+			const matched = matchTextToChartData(spanText, rows, resolved.localeTag);
+			const slotKey = inferSlotKeyForElement(islandEl, spanEl) || `text:${spanText}`;
+			if (matched) return {
+				target: {
+					...matched,
+					slotKey,
+					baseText: spanText,
+					initialValue: spanText
+				},
+				anchorEl: spanEl
+			};
+			return {
+				target: {
+					kind: "override",
+					slotKey,
+					baseText: spanText,
+					initialValue: spanText
+				},
+				anchorEl: spanEl
+			};
+		}
+	}
+	const footerEl = el.closest?.(".ztd-card > footer");
+	if (footerEl) return {
+		target: {
+			kind: "field",
+			field: "takeaway",
+			slotKey: "field:takeaway"
+		},
+		anchorEl: findFieldElementInIsland(islandEl, "takeaway") ?? footerEl
+	};
 	return null;
 }
 function resolveHitTargetInIsland(islandEl, clientX, clientY, eventTarget, props, bounds, worldPoint) {
 	const resolved = resolveChartSpec(props);
-	const rows = resolved.spec.data ?? [];
 	const doc = islandEl?.ownerDocument;
 	const candidates = [];
 	if (eventTarget && islandEl?.contains?.(eventTarget)) candidates.push(eventTarget);
@@ -23930,87 +24294,137 @@ function resolveHitTargetInIsland(islandEl, clientX, clientY, eventTarget, props
 		const el = doc.elementFromPoint(clientX, clientY);
 		if (el && islandEl?.contains?.(el) && !candidates.includes(el)) candidates.push(el);
 	}
-	if (candidates.length === 0 && islandEl && typeof islandEl.querySelectorAll === "function" && Number.isFinite(clientX) && Number.isFinite(clientY)) {
-		const nodes = islandEl.querySelectorAll("[data-chart-field], svg text, .ztd-card > header h2, .ztd-card > header span, .ztd-card > footer span");
-		for (const node of nodes) {
-			const rect = node.getBoundingClientRect?.();
-			if (rect && rect.width > 0 && rect.height > 0 && clientX >= rect.left - 4 && clientX <= rect.right + 4 && clientY >= rect.top - 4 && clientY <= rect.bottom + 4) candidates.push(node);
-		}
-	}
 	for (const el of candidates) {
-		const fieldEl = el.closest?.("[data-chart-field]");
-		if (fieldEl) {
-			const field = fieldEl.getAttribute("data-chart-field");
-			if (CARD_FIELDS.includes(field)) return {
-				kind: "field",
-				field,
-				label: FIELD_LABELS[field]
-			};
-		}
-		const svgTextEl = el.closest?.("svg text") ?? (el.tagName?.toLowerCase?.() === "tspan" ? el.parentElement : null);
-		if (svgTextEl) {
-			const rawText = svgTextEl.textContent?.trim() ?? "";
-			const matched = matchTextToChartData(rawText, rows, resolved.localeTag);
-			if (matched) {
-				const rect = svgTextEl.getBoundingClientRect?.();
-				return {
-					...matched,
-					anchorText: rawText,
-					lastRect: rect && rect.width > 0 ? rect : null
-				};
+		const hit = buildTargetFromElement(islandEl, el, resolved);
+		if (hit) return hit;
+	}
+	if (islandEl && typeof islandEl.querySelectorAll === "function" && Number.isFinite(clientX) && Number.isFinite(clientY)) {
+		const nodes = islandEl.querySelectorAll("[data-chart-text-slot], [data-chart-field], svg text, .ztd-card > header h1, .ztd-card > header h2, .ztd-card > header h3, .ztd-card > header span, .ztd-card > footer span");
+		let bestNode = null;
+		let bestScore = Infinity;
+		for (const node of nodes) {
+			if (isScreenReaderOrHidden(node)) continue;
+			const rect = node.getBoundingClientRect?.();
+			if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+			const pad = 6;
+			if (clientX >= rect.left - pad && clientX <= rect.right + pad && clientY >= rect.top - pad && clientY <= rect.bottom + pad) {
+				const cx = (rect.left + rect.right) / 2;
+				const cy = (rect.top + rect.bottom) / 2;
+				const score = Math.hypot(clientX - cx, clientY - cy) + rect.width * rect.height * .001;
+				if (score < bestScore) {
+					bestScore = score;
+					bestNode = node;
+				}
 			}
 		}
-		if (el.closest?.(".ztd-card > header h1, .ztd-card > header h2, .ztd-card > header h3")) return {
-			kind: "field",
-			field: "title",
-			label: FIELD_LABELS.title
-		};
-		if (el.closest?.(".ztd-card > footer")) return {
-			kind: "field",
-			field: "takeaway",
-			label: FIELD_LABELS.takeaway
-		};
-		const spanEl = el.closest?.("span");
-		if (spanEl && islandEl?.contains?.(spanEl)) {
-			const spanText = spanEl.textContent?.trim() ?? "";
-			if (spanText && spanText === resolved.subtitle) return {
-				kind: "field",
-				field: "subtitle",
-				label: FIELD_LABELS.subtitle
-			};
-			const matchedLegend = matchTextToChartData(spanText, rows, resolved.localeTag);
-			if (matchedLegend) {
-				const rect = spanEl.getBoundingClientRect?.();
-				return {
-					...matchedLegend,
-					anchorText: spanText,
-					lastRect: rect && rect.width > 0 ? rect : null
-				};
-			}
+		if (bestNode) {
+			const hit = buildTargetFromElement(islandEl, bestNode, resolved);
+			if (hit) return hit;
 		}
 	}
 	if (bounds && worldPoint && resolved.variant === "card") {
 		const localY = worldPoint.y - bounds.y;
 		if (localY >= 42 && localY < 68) return {
-			kind: "field",
-			field: "subtitle",
-			label: FIELD_LABELS.subtitle
+			target: {
+				kind: "field",
+				field: "subtitle",
+				slotKey: "field:subtitle"
+			},
+			anchorEl: findFieldElementInIsland(islandEl, "subtitle")
 		};
 		if (localY > bounds.height - 48) return {
-			kind: "field",
-			field: "takeaway",
-			label: FIELD_LABELS.takeaway
+			target: {
+				kind: "field",
+				field: "takeaway",
+				slotKey: "field:takeaway"
+			},
+			anchorEl: findFieldElementInIsland(islandEl, "takeaway")
 		};
 	}
 	return {
-		kind: "field",
-		field: "title",
-		label: FIELD_LABELS.title
+		target: {
+			kind: "field",
+			field: "title",
+			slotKey: "field:title"
+		},
+		anchorEl: findFieldElementInIsland(islandEl, "title")
 	};
 }
+function captureAnchorMetrics(islandEl, anchorEl, target, resolved, zoom) {
+	const win = (islandEl?.ownerDocument ?? anchorEl?.ownerDocument)?.defaultView ?? globalThis;
+	const cs = anchorEl && typeof win.getComputedStyle === "function" ? win.getComputedStyle(anchorEl) : null;
+	const isSvgText = anchorEl?.tagName?.toLowerCase?.() === "text";
+	let textAlign = "left";
+	if (isSvgText) {
+		const anchorAttr = anchorEl.getAttribute?.("text-anchor") || cs?.textAnchor || "start";
+		if (anchorAttr === "middle") textAlign = "center";
+		else if (anchorAttr === "end") textAlign = "right";
+	} else if (cs?.textAlign && [
+		"left",
+		"center",
+		"right"
+	].includes(cs.textAlign)) textAlign = cs.textAlign;
+	let baseFontSize = parseFloat(anchorEl?.getAttribute?.("font-size") ?? "") || parseFloat(cs?.fontSize ?? "");
+	if (!Number.isFinite(baseFontSize) || baseFontSize <= 0) {
+		if (target.kind === "field") baseFontSize = target.field === "title" ? 22 : target.field === "takeaway" || target.field === "cardNumber" ? 17 : 12.5;
+		else baseFontSize = 11.5;
+	}
+	const fontWeight = anchorEl?.getAttribute?.("font-weight") || cs?.fontWeight || (target.kind === "field" && (target.field === "title" || target.field === "takeaway") ? "800" : "500");
+	const fontFamily = cs?.fontFamily || resolved.resolvedTheme.fontFamily || "Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif";
+	const letterSpacing = cs?.letterSpacing || "normal";
+	let color = resolved.resolvedTheme.ink;
+	if (isSvgText) {
+		const fillAttr = anchorEl.getAttribute?.("fill");
+		const csFill = cs?.fill;
+		if (csFill && csFill !== "none" && !csFill.startsWith("url(")) color = csFill;
+		else if (fillAttr && fillAttr !== "none" && !fillAttr.startsWith("url(")) color = fillAttr;
+	} else if (cs?.color) color = cs.color;
+	let svgScaleRatio = 1;
+	if (isSvgText) {
+		const svgEl = anchorEl.closest?.("svg");
+		const svgRect = svgEl?.getBoundingClientRect?.();
+		const vbAttr = svgEl?.getAttribute?.("viewBox");
+		const vbParts = vbAttr ? vbAttr.trim().split(/[\s,]+/).map(Number) : null;
+		if (svgRect && svgRect.width > 0 && vbParts && vbParts.length === 4 && vbParts[2] > 0) svgScaleRatio = svgRect.width / zoom / vbParts[2];
+	}
+	const islandRect = islandEl?.getBoundingClientRect?.();
+	const elRect = anchorEl?.getBoundingClientRect?.();
+	let relBox = null;
+	if (elRect && elRect.width > 0 && elRect.height > 0) {
+		const baseLeft = islandRect && islandRect.width > 0 ? islandRect.left : 0;
+		const baseTop = islandRect && islandRect.height > 0 ? islandRect.top : 0;
+		relBox = {
+			hasIslandOrigin: Boolean(islandRect && islandRect.width > 0),
+			left: (elRect.left - baseLeft) / zoom,
+			top: (elRect.top - baseTop) / zoom,
+			width: elRect.width / zoom,
+			height: elRect.height / zoom
+		};
+	}
+	return {
+		isSvgText,
+		textAlign,
+		baseFontSize,
+		fontWeight,
+		fontFamily,
+		letterSpacing,
+		color,
+		svgScaleRatio,
+		relBox
+	};
+}
+function estimateTextPixelWidth(text, fontSizePx) {
+	const str = String(text ?? "");
+	let units = 0;
+	for (let i = 0; i < str.length; i++) {
+		const code = str.charCodeAt(i);
+		units += code > 255 ? .95 : .62;
+	}
+	return Math.ceil(Math.max(1.5, units + .8) * fontSizePx);
+}
 /**
-* Mounts an IME-safe inline text editor onto the active Alid canvas HUD for
-* double-click and `Enter` editing of chart titles, subtitles, takeaways, and SVG data labels.
+* Mounts a seamless, zero-chrome inline text editor onto the active Alid canvas HUD
+* so every text in a chart can be edited directly in place via double-click or `Enter`.
 */
 function mountInlineEditor(context) {
 	const provider = context?.services?.get?.("canvas.active-tool-surface");
@@ -24037,23 +24451,11 @@ function mountInlineEditor(context) {
 			display: "none",
 			pointerEvents: "auto",
 			zIndex: "25",
-			boxSizing: "border-box"
-		});
-		const badge = doc.createElement("div");
-		Object.assign(badge.style, {
-			position: "absolute",
-			left: "0",
-			top: "-20px",
-			padding: "1px 6px",
-			borderRadius: "4px",
-			background: "#3182f6",
-			color: "#ffffff",
-			fontSize: "10px",
-			fontWeight: "600",
-			lineHeight: "15px",
-			whiteSpace: "nowrap",
-			pointerEvents: "none",
-			boxShadow: "0 1px 3px rgba(0,0,0,0.18)"
+			boxSizing: "border-box",
+			background: "transparent",
+			border: "none",
+			padding: "0",
+			margin: "0"
 		});
 		const input = doc.createElement("input");
 		input.type = "text";
@@ -24067,35 +24469,36 @@ function mountInlineEditor(context) {
 			height: "100%",
 			boxSizing: "border-box",
 			margin: "0",
-			padding: "2px 8px",
-			border: "2px solid #3182f6",
-			borderRadius: "6px",
+			padding: "0",
+			border: "none",
+			borderRadius: "0",
 			outline: "none",
-			background: "rgba(255, 255, 255, 0.96)",
-			color: "#191f28",
-			fontFamily: "Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
-			fontSize: "14px",
-			fontWeight: "700",
-			lineHeight: "1.3",
-			boxShadow: "0 4px 12px rgba(15, 23, 42, 0.14)"
+			background: "transparent",
+			boxShadow: "none",
+			fontVariantNumeric: "tabular-nums"
 		});
-		container.append(badge, input);
+		container.append(input);
 		s.surface.hud.append(container);
 		let hiddenElements = [];
-		function restoreHiddenElements() {
-			for (const el of hiddenElements) if (el && el.style) el.style.visibility = "";
+		function restoreHiddenElements(islandEl) {
+			if (islandEl) delete islandEl.__ztdActiveEditSlot;
+			for (const el of hiddenElements) {
+				if (el && el.style) el.style.opacity = "";
+				if (el && el.dataset) delete el.dataset.hiddenByEditor;
+			}
 			hiddenElements = [];
+		}
+		function hideTargetElement(el) {
+			if (!el || !el.style) return;
+			el.style.opacity = "0";
+			if (el.dataset) el.dataset.hiddenByEditor = "true";
+			if (!hiddenElements.includes(el)) hiddenElements.push(el);
 		}
 		function positionEditor() {
 			if (!session) return;
 			const props = context.world.getCanonical?.(session.id, CHART_ASPECT_ID);
 			if (!props) return;
-			const resolved = resolveChartSpec(props);
-			const isDark = resolved.themeName === "dark";
-			input.style.background = isDark ? "rgba(23, 27, 34, 0.96)" : "rgba(255, 255, 255, 0.97)";
-			input.style.color = isDark ? "#f3f5f8" : "#191f28";
-			input.style.borderColor = resolved.accentColor || "#3182f6";
-			badge.style.background = resolved.accentColor || "#3182f6";
+			resolveChartSpec(props);
 			const hudRect = s.surface.hud.getBoundingClientRect?.() ?? {
 				left: 0,
 				top: 0,
@@ -24104,251 +24507,339 @@ function mountInlineEditor(context) {
 			};
 			const zoom = Math.max(.1, s.host?.getZoom?.() ?? 1);
 			const islandEl = findIslandElement(s.surface.element, session.id);
-			restoreHiddenElements();
-			if (session.target.kind === "field") {
-				const field = session.target.field;
-				const fieldEl = findFieldElementInIsland(islandEl, field);
-				const fieldRect = fieldEl?.getBoundingClientRect?.();
-				const islandRect = islandEl?.getBoundingClientRect?.();
-				const fontSizePx = (field === "title" ? 18 : field === "takeaway" ? 14 : 12.5) * zoom;
-				input.style.fontSize = `${Math.max(11, Math.round(fontSizePx))}px`;
-				input.style.fontWeight = field === "subtitle" ? "500" : "700";
-				input.style.textAlign = "left";
-				if (fieldRect && fieldRect.width > 0 && fieldRect.height > 0) {
-					fieldEl.style.visibility = "hidden";
-					hiddenElements.push(fieldEl);
-					const availWidth = islandRect && islandRect.width > 0 ? Math.max(fieldRect.width + 20, islandRect.width - 36 * zoom) : Math.max(160, fieldRect.width + 40);
-					container.style.left = `${fieldRect.left - hudRect.left - 4}px`;
-					container.style.top = `${fieldRect.top - hudRect.top - 3}px`;
-					container.style.width = `${Math.max(120, availWidth)}px`;
-					container.style.height = `${Math.max(26, fieldRect.height + 8)}px`;
-					container.style.transform = "none";
-					return;
-				}
-			} else if (session.target.kind === "data") {
-				input.style.fontSize = `${Math.max(11, Math.round(12.5 * zoom))}px`;
-				input.style.fontWeight = "600";
-				input.style.textAlign = "center";
-				let matchedSvgText = null;
-				if (islandEl && typeof islandEl.querySelectorAll === "function") {
-					for (const node of islandEl.querySelectorAll("svg text")) if (node.textContent?.trim() === session.target.anchorText) {
-						matchedSvgText = node;
-						break;
-					}
-				}
-				const rect = matchedSvgText?.getBoundingClientRect?.() ?? session.target.lastRect;
-				if (rect && rect.width > 0 && rect.height > 0) {
-					if (matchedSvgText) {
-						matchedSvgText.style.visibility = "hidden";
-						hiddenElements.push(matchedSvgText);
-					}
-					const boxWidth = Math.max(84 * zoom, rect.width + 28 * zoom);
-					const boxHeight = Math.max(26, rect.height + 10);
-					container.style.left = `${rect.left + rect.width / 2 - hudRect.left}px`;
-					container.style.top = `${rect.top - hudRect.top - 4}px`;
-					container.style.width = `${boxWidth}px`;
-					container.style.height = `${boxHeight}px`;
-					container.style.transform = "translateX(-50%)";
-					return;
-				}
+			if (islandEl && session.target.slotKey) islandEl.__ztdActiveEditSlot = session.target.slotKey;
+			const liveTargetEl = findSlotElementInIsland(islandEl, session.target) ?? session.anchorEl;
+			if (liveTargetEl) hideTargetElement(liveTargetEl);
+			const metrics = session.metrics;
+			const scale = zoom * (metrics.svgScaleRatio || 1);
+			const fontSizePx = Math.max(10, Math.round(metrics.baseFontSize * scale * 10) / 10);
+			Object.assign(input.style, {
+				fontFamily: metrics.fontFamily,
+				fontSize: `${fontSizePx}px`,
+				fontWeight: String(metrics.fontWeight),
+				letterSpacing: metrics.letterSpacing,
+				color: metrics.color,
+				caretColor: metrics.color,
+				textAlign: metrics.textAlign,
+				background: "transparent",
+				border: "none",
+				outline: "none",
+				boxShadow: "none"
+			});
+			const islandRect = islandEl?.getBoundingClientRect?.();
+			const relBox = metrics.relBox;
+			if (relBox) {
+				const originLeft = relBox.hasIslandOrigin && islandRect ? islandRect.left : 0;
+				const originTop = relBox.hasIslandOrigin && islandRect ? islandRect.top : 0;
+				const screenLeft = originLeft + relBox.left * zoom - hudRect.left;
+				const screenTop = originTop + relBox.top * zoom - hudRect.top;
+				const baseWidth = relBox.width * zoom;
+				const baseHeight = Math.max(fontSizePx * 1.25, relBox.height * zoom);
+				const textPxWidth = estimateTextPixelWidth(input.value, fontSizePx);
+				const boxWidth = Math.max(baseWidth + 16, textPxWidth + 20, 36);
+				const boxHeight = Math.max(18, Math.ceil(baseHeight + 4));
+				let left = screenLeft;
+				if (metrics.textAlign === "center") left = screenLeft + baseWidth / 2 - boxWidth / 2;
+				else if (metrics.textAlign === "right") left = screenLeft + baseWidth - boxWidth;
+				container.style.left = `${Math.round(left * 10) / 10}px`;
+				container.style.top = `${Math.round((screenTop - (boxHeight - relBox.height * zoom) / 2) * 10) / 10}px`;
+				container.style.width = `${Math.ceil(boxWidth)}px`;
+				container.style.height = `${boxHeight}px`;
+				container.style.transform = "none";
+				input.style.lineHeight = `${boxHeight}px`;
+				return;
 			}
-			const b = context.world.getComputed?.(session.id, "computed.layoutBounds") ?? {
-				x: 0,
-				y: 0,
-				width: 480,
-				height: 340,
-				rotation: 0
-			};
-			const field = session.target.kind === "field" ? session.target.field : "title";
-			const localY = field === "title" ? 26 : field === "subtitle" ? 54 : b.height - 28;
-			const angle = b.rotation ?? 0;
-			const cx = b.x + b.width / 2;
-			const cy = b.y + b.height / 2;
-			const dy = localY - b.height / 2;
-			const screenPt = {
+			const b = context.world.getComputed?.(session.id) ?? context.world.getCanonical?.(session.id, "core.bounds");
+			const t = context.world.getCanonical?.(session.id, "core.transform") ?? {
 				x: 0,
 				y: 0
 			};
-			s.host?.worldToScreen?.(cx - dy * Math.sin(angle), cy + dy * Math.cos(angle), screenPt);
-			container.style.width = `${Math.max(140, (b.width - 40) * zoom)}px`;
-			container.style.height = `${Math.max(28, 28 * zoom)}px`;
-			container.style.left = `${screenPt.x - hudRect.left}px`;
-			container.style.top = `${screenPt.y - hudRect.top}px`;
-			container.style.transform = `translate(-50%, -50%) rotate(${angle}rad)`;
+			const wx = Number.isFinite(b?.x) ? b.x : Number.isFinite(t.x) ? t.x : 0;
+			const wy = Number.isFinite(b?.y) ? b.y : Number.isFinite(t.y) ? t.y : 0;
+			const ww = Number.isFinite(b?.width) ? b.width : 480;
+			const wh = Number.isFinite(b?.height) ? b.height : 340;
+			const topLeft = {
+				x: 0,
+				y: 0
+			};
+			const bottomRight = {
+				x: 0,
+				y: 0
+			};
+			s.host.worldToScreen(wx, wy, topLeft);
+			s.host.worldToScreen(wx + ww, wy + wh, bottomRight);
+			const boxLeft = topLeft.x - hudRect.left;
+			const boxTop = topLeft.y - hudRect.top;
+			const boxWidth = Math.max(160, bottomRight.x - topLeft.x);
+			const boxHeight = Math.max(120, bottomRight.y - topLeft.y);
+			const field = session.target.field ?? "title";
+			const yOffset = field === "title" ? 18 * zoom : field === "subtitle" ? 46 * zoom : boxHeight - 36 * zoom;
+			const h = Math.max(22, Math.ceil(fontSizePx * 1.35));
+			container.style.left = `${boxLeft + 20 * zoom}px`;
+			container.style.top = `${boxTop + yOffset}px`;
+			container.style.width = `${Math.max(120, boxWidth - 40 * zoom)}px`;
+			container.style.height = `${h}px`;
+			container.style.transform = "none";
+			input.style.lineHeight = `${h}px`;
 		}
-		function save() {
-			if (!session || composing) return;
-			const current = context.world.getCanonical?.(session.id, CHART_ASPECT_ID);
-			if (!current) {
-				finish(false);
+		function applyDraftValue(rawValue) {
+			if (!session || !context.world.isAlive?.(session.id)) return;
+			const props = context.world.getCanonical?.(session.id, CHART_ASPECT_ID);
+			if (!props) return;
+			const patch = buildPatchForTarget(props, session.target, rawValue);
+			if (!patch) {
+				session.base = rawValue;
 				return;
 			}
-			const remoteValue = readTargetValue(current, session.target);
-			const merged = mergeDraft(session.base, input.value, remoteValue);
-			const patch = buildPatchForTarget(current, session.target, merged);
-			if (patch) {
+			session.writing = true;
+			try {
 				textHistory?.change?.();
-				context.world.applyCanonicalTransaction(`${EXTENSION_ID}:edit-chart`, [{
+				context.world.applyCanonicalTransaction(`${EXTENSION_ID}:inline-edit`, [{
 					id: session.id,
 					aspect: CHART_ASPECT_ID,
 					patch
 				}]);
-				if (session.target.kind === "data") session.target.anchorText = merged.trim();
+				session.base = rawValue;
+				s.host?.requestRender?.();
+			} finally {
+				session.writing = false;
 			}
-			session.base = merged;
-			if (input.value !== merged) input.value = merged;
 		}
-		function finish(commit = true) {
-			if (!session || composing) return;
-			if (commit) save();
+		function finish(commit) {
+			if (!session) return;
+			const ending = session;
 			session = null;
-			until = 0;
-			restoreHiddenElements();
-			container.style.display = "none";
-			delete input.dataset.editing;
-			s.host?.requestRender?.();
-			textHistory?.seal?.();
-		}
-		closeCurrent = () => {
 			composing = false;
-			finish(true);
+			until = 0;
 			offWorld();
-		};
-		openCurrent = (id, targetOrField = "title") => {
-			const props = context.world.getCanonical?.(id, CHART_ASPECT_ID);
-			if (!props || context.world.isEntityReadOnly?.(id)) return false;
-			finish(true);
-			const target = typeof targetOrField === "string" ? {
-				kind: "field",
-				field: CARD_FIELDS.includes(targetOrField) ? targetOrField : "title",
-				label: FIELD_LABELS[targetOrField] ?? FIELD_LABELS.title
-			} : targetOrField;
+			offWorld = () => {};
+			restoreHiddenElements(findIslandElement(s.surface.element, ending.id));
+			container.style.display = "none";
+			if (commit && context.world.isAlive?.(ending.id)) {
+				const props = context.world.getCanonical?.(ending.id, CHART_ASPECT_ID);
+				if (props) {
+					const patch = buildPatchForTarget(props, ending.target, input.value);
+					if (patch) {
+						textHistory?.change?.();
+						context.world.applyCanonicalTransaction(`${EXTENSION_ID}:inline-edit`, [{
+							id: ending.id,
+							aspect: CHART_ASPECT_ID,
+							patch
+						}]);
+					}
+				}
+			}
+			textHistory?.seal?.();
+			if (doc.activeElement === input) input.blur?.();
+			s.host?.requestRender?.();
+		}
+		function startEditing(entityId, target, explicitAnchorEl = null) {
+			if (!entityId || !context.world.isAlive?.(entityId)) return false;
+			const props = context.world.getCanonical?.(entityId, CHART_ASPECT_ID);
+			if (!props) return false;
+			if (session) finish(true);
+			const resolved = resolveChartSpec(props);
+			const zoom = Math.max(.1, s.host?.getZoom?.() ?? 1);
+			const islandEl = findIslandElement(s.surface.element, entityId);
+			const anchorEl = explicitAnchorEl ?? findSlotElementInIsland(islandEl, target);
+			const metrics = captureAnchorMetrics(islandEl, anchorEl, target, resolved, zoom);
 			const initial = readTargetValue(props, target);
+			if (islandEl && target.slotKey) islandEl.__ztdActiveEditSlot = target.slotKey;
+			if (anchorEl) hideTargetElement(anchorEl);
 			session = {
-				id,
+				id: entityId,
 				target,
-				base: initial
+				anchorEl,
+				metrics,
+				base: initial,
+				writing: false
 			};
-			const hint = target.kind === "field" ? " · Tab으로 다음 항목" : " · Enter로 적용";
-			badge.textContent = `${target.label || "텍스트 편집"}${hint}`;
-			input.setAttribute("aria-label", target.label || "차트 텍스트 편집");
-			input.dataset.editing = "true";
 			input.value = initial;
 			container.style.display = "block";
 			positionEditor();
-			s.host?.requestRender?.();
-			input.focus();
+			input.focus?.();
 			input.select?.();
+			offWorld = context.world.subscribe?.(() => {
+				if (!session || session.writing) return;
+				if (!context.world.isAlive?.(session.id)) {
+					finish(false);
+					return;
+				}
+				const latestProps = context.world.getCanonical?.(session.id, CHART_ASPECT_ID);
+				if (!latestProps) {
+					finish(false);
+					return;
+				}
+				const remote = readTargetValue(latestProps, session.target);
+				if (remote !== session.base) {
+					const next = mergeDraft(session.base, input.value, remote);
+					session.base = remote;
+					if (!composing && input.value !== next) input.value = next;
+				}
+				positionEditor();
+			}) ?? (() => {});
 			return true;
-		};
-		const locked = (e) => composing || e.isComposing || e.keyCode === 229 || e.key === "Process" || Date.now() < until;
-		input.addEventListener("compositionstart", () => {
+		}
+		function cycleEditableTarget(step) {
+			if (!session) return;
+			const entityId = session.id;
+			const props = context.world.getCanonical?.(entityId, CHART_ASPECT_ID);
+			if (!props) return;
+			const resolved = resolveChartSpec(props);
+			const islandEl = findIslandElement(s.surface.element, entityId);
+			if (islandEl && typeof islandEl.querySelectorAll === "function") {
+				const nodes = Array.from(islandEl.querySelectorAll("[data-chart-field], [data-chart-text-slot], svg text")).filter((el) => !isScreenReaderOrHidden(el));
+				const uniqueSlots = [];
+				const seen = /* @__PURE__ */ new Set();
+				for (const el of nodes) {
+					const hit = buildTargetFromElement(islandEl, el, resolved);
+					if (!hit || !hit.target.slotKey || seen.has(hit.target.slotKey)) continue;
+					seen.add(hit.target.slotKey);
+					uniqueSlots.push(hit);
+				}
+				if (uniqueSlots.length > 1) {
+					const currentIdx = uniqueSlots.findIndex((item) => item.target.slotKey === session.target.slotKey);
+					const nextHit = uniqueSlots[((currentIdx >= 0 ? currentIdx : 0) + step + uniqueSlots.length) % uniqueSlots.length];
+					startEditing(entityId, nextHit.target, nextHit.anchorEl);
+					return;
+				}
+			}
+			const basicFields = [
+				"title",
+				"subtitle",
+				"takeaway"
+			];
+			const currentField = session.target.field ?? "title";
+			const nextField = basicFields[(Math.max(0, basicFields.indexOf(currentField)) + step + basicFields.length) % basicFields.length];
+			startEditing(entityId, {
+				kind: "field",
+				field: nextField,
+				slotKey: `field:${nextField}`
+			});
+		}
+		const locked = (e) => Boolean(composing || e?.isComposing || e?.keyCode === 229 || Date.now() < until);
+		const onCompositionStart = () => {
 			composing = true;
-		});
-		input.addEventListener("compositionend", () => {
+		};
+		const onCompositionEnd = () => {
 			composing = false;
 			until = Date.now() + 16;
-			save();
-		});
-		input.addEventListener("input", () => {
-			save();
-		});
-		input.addEventListener("blur", () => {
-			if (!composing) finish(true);
-		});
-		input.addEventListener("keydown", (e) => {
-			if (locked(e)) return;
-			if (e.key === "Escape") {
-				e.preventDefault();
-				e.stopPropagation();
-				if (session) input.value = session.base;
-				finish(false);
-				s.surface.element.focus?.();
-			} else if (e.key === "Enter" && !e.shiftKey) {
-				e.preventDefault();
-				e.stopPropagation();
-				finish(true);
-				s.surface.element.focus?.();
-			} else if (e.key === "Tab" && session) {
-				e.preventDefault();
-				e.stopPropagation();
-				const { id, target } = session;
-				finish(true);
-				if (target.kind === "field") {
-					const nextField = CARD_FIELDS[(CARD_FIELDS.indexOf(target.field) + (e.shiftKey ? CARD_FIELDS.length - 1 : 1)) % CARD_FIELDS.length];
-					openCurrent(id, nextField);
-				} else openCurrent(id, "title");
+			if (session) {
+				applyDraftValue(input.value);
+				positionEditor();
 			}
-		});
+		};
+		const onInput = (e) => {
+			if (!session) return;
+			positionEditor();
+			if (composing || e?.isComposing) return;
+			applyDraftValue(input.value);
+			positionEditor();
+		};
+		const onKeyDown = (e) => {
+			if (!session) return;
+			if (locked(e)) {
+				e.stopPropagation?.();
+				return;
+			}
+			if (e.key === "Tab") {
+				e.preventDefault?.();
+				e.stopPropagation?.();
+				cycleEditableTarget(e.shiftKey ? -1 : 1);
+				return;
+			}
+			if (e.key === "Enter" || e.key === "Escape") {
+				e.preventDefault?.();
+				e.stopPropagation?.();
+				finish(e.key === "Enter");
+			}
+		};
+		const onBlur = () => {
+			if (composing) return;
+			finish(true);
+		};
 		const onDoubleClick = (e) => {
-			if (composing || e.defaultPrevented || e.target?.closest?.("input,textarea,button,select,[contenteditable],[data-canvas-editor]")) return;
+			if (e.defaultPrevented || composing) return;
 			const worldPoint = {
 				x: 0,
 				y: 0
 			};
-			s.host?.screenToWorld?.(e.clientX, e.clientY, worldPoint);
-			let targetEntityId = null;
-			const selected = s.selection?.getSelection?.() ?? [];
-			if (selected.length === 1 && context.world.getCanonical?.(selected[0], CHART_ASPECT_ID)) {
-				const b = context.world.getComputed?.(selected[0], "computed.layoutBounds");
-				if (!b || worldPoint.x >= b.x && worldPoint.x <= b.x + b.width && worldPoint.y >= b.y && worldPoint.y <= b.y + b.height) targetEntityId = selected[0];
+			if (Number.isFinite(e.clientX) && Number.isFinite(e.clientY) && s.host?.screenToWorld) s.host.screenToWorld(e.clientX, e.clientY, worldPoint);
+			let hitId = null;
+			let hitBounds = null;
+			const targetEl = e.target && typeof e.target.closest === "function" ? e.target.closest("[data-entity-id]") : null;
+			const domEntityId = targetEl?.getAttribute?.("data-entity-id") ?? targetEl?.dataset?.entityId;
+			if (domEntityId && context.world.getCanonical?.(domEntityId, CHART_ASPECT_ID)) {
+				hitId = domEntityId;
+				hitBounds = context.world.getComputed?.(domEntityId);
 			}
-			if (!targetEntityId) {
-				const fromDom = e.target?.closest?.("[data-entity-id]")?.getAttribute?.("data-entity-id");
-				if (fromDom && context.world.getCanonical?.(fromDom, CHART_ASPECT_ID)) targetEntityId = fromDom;
-			}
-			if (!targetEntityId) for (const candidateId of context.world.listEntityIds?.() ?? []) {
-				if (!context.world.getCanonical?.(candidateId, CHART_ASPECT_ID)) continue;
-				const b = context.world.getComputed?.(candidateId, "computed.layoutBounds");
-				if (b && worldPoint.x >= b.x && worldPoint.x <= b.x + b.width && worldPoint.y >= b.y && worldPoint.y <= b.y + b.height) {
-					targetEntityId = candidateId;
-					break;
+			if (!hitId) {
+				const ids = [...s.selection?.getSelection?.() ?? [], ...context.world.listEntityIds?.() ?? []];
+				const visited = /* @__PURE__ */ new Set();
+				for (const id of ids) {
+					if (visited.has(id)) continue;
+					visited.add(id);
+					if (!context.world.getCanonical?.(id, CHART_ASPECT_ID)) continue;
+					const b = context.world.getComputed?.(id);
+					if (b && worldPoint.x >= b.x && worldPoint.x <= b.x + b.width && worldPoint.y >= b.y && worldPoint.y <= b.y + b.height) {
+						hitId = id;
+						hitBounds = b;
+						break;
+					}
 				}
 			}
-			if (!targetEntityId) return;
-			const props = context.world.getCanonical(targetEntityId, CHART_ASPECT_ID);
+			if (!hitId) return;
+			const props = context.world.getCanonical?.(hitId, CHART_ASPECT_ID);
 			if (!props) return;
-			const bounds = context.world.getComputed?.(targetEntityId, "computed.layoutBounds");
-			const hitTarget = resolveHitTargetInIsland(findIslandElement(s.surface.element, targetEntityId), e.clientX, e.clientY, e.target, props, bounds, worldPoint);
-			if (openCurrent(targetEntityId, hitTarget)) e.preventDefault();
+			const hit = resolveHitTargetInIsland(findIslandElement(s.surface.element, hitId), e.clientX, e.clientY, e.target, props, hitBounds, worldPoint);
+			e.preventDefault?.();
+			e.stopPropagation?.();
+			startEditing(hitId, hit.target, hit.anchorEl);
 		};
-		s.surface.element.addEventListener("dblclick", onDoubleClick);
-		offWorld = context.world.subscribe?.(() => {
-			if (!session || composing) return;
-			const current = context.world.getCanonical?.(session.id, CHART_ASPECT_ID);
-			if (!current) {
-				session = null;
-				restoreHiddenElements();
-				container.style.display = "none";
-				return;
-			}
-			const remoteValue = readTargetValue(current, session.target);
-			const merged = mergeDraft(session.base, input.value, remoteValue);
-			session.base = remoteValue;
-			if (input.value !== merged) input.value = merged;
-		}) ?? (() => {});
 		const offFrame = frames?.subscribe?.(() => {
 			if (session) positionEditor();
 		}) ?? (() => {});
+		input.addEventListener("compositionstart", onCompositionStart);
+		input.addEventListener("compositionend", onCompositionEnd);
+		input.addEventListener("input", onInput);
+		input.addEventListener("keydown", onKeyDown);
+		input.addEventListener("blur", onBlur);
+		s.surface.element.addEventListener("dblclick", onDoubleClick);
+		closeCurrent = () => finish(true);
+		openCurrent = (entityId, field = "title") => {
+			const targetId = entityId ?? (s.selection?.getSelection?.() ?? []).find((id) => Boolean(context.world.getCanonical?.(id, CHART_ASPECT_ID)));
+			if (!targetId) return false;
+			const safeField = CARD_FIELDS.includes(field) ? field : "title";
+			return startEditing(targetId, {
+				kind: "field",
+				field: safeField,
+				slotKey: `field:${safeField}`
+			});
+		};
 		detachCurrent = () => {
-			offWorld();
 			offFrame();
-			restoreHiddenElements();
+			offWorld();
+			restoreHiddenElements(session ? findIslandElement(s.surface.element, session.id) : null);
+			input.removeEventListener("compositionstart", onCompositionStart);
+			input.removeEventListener("compositionend", onCompositionEnd);
+			input.removeEventListener("input", onInput);
+			input.removeEventListener("keydown", onKeyDown);
+			input.removeEventListener("blur", onBlur);
 			s.surface.element.removeEventListener("dblclick", onDoubleClick);
 			container.remove();
 		};
 	}
 	mount();
-	const offSurface = provider?.subscribe?.(mount);
+	const offSurface = provider?.subscribe?.(() => mount()) ?? (() => {});
 	return {
-		open(id, targetOrField = "title") {
-			return openCurrent(id, targetOrField);
+		open(entityId, field = "title") {
+			return openCurrent(entityId, field);
 		},
 		close() {
 			closeCurrent();
 		},
 		dispose() {
-			offSurface?.();
+			offSurface();
 			closeCurrent();
 			detachCurrent();
 		}
@@ -25073,7 +25564,6 @@ var CHART_ICON = Object.freeze({ paths: Object.freeze([
 	"M11 14V6",
 	"M15 14v-4"
 ]) });
-var EDIT_ICON = Object.freeze({ paths: Object.freeze(["M4 14 14 4l3 3L7 17H4z", "M12 6l3 3"]) });
 var COMMAND_LABELS = Object.freeze({
 	"insert-chart": "ZTD 차트 추가",
 	"edit-chart": "차트 텍스트 인라인 편집",
@@ -25137,15 +25627,6 @@ var ztdChartAspect = Object.freeze({
 					label: "다크",
 					value: "dark"
 				}]
-			},
-			{
-				id: "ztd-charts.edit.selection",
-				kind: "action",
-				label: "텍스트 편집",
-				icon: EDIT_ICON,
-				commandSymbol: `${EXTENSION_ID}:edit-chart`,
-				placement: "selection-bar",
-				requiresSelection: true
 			},
 			{
 				id: "ztd-charts.suggest.selection",

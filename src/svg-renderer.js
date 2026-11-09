@@ -241,11 +241,33 @@ function inlineZtdCssVariables(svgMarkup, resolvedTheme) {
   });
 }
 
+function unescapeXml(value) {
+  return String(value ?? '')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&');
+}
+
+function applySvgTextOverrides(svgContent, textOverrides) {
+  if (!svgContent) return '';
+  let idx = 0;
+  return svgContent.replace(/<text\b([^>]*)>([\s\S]*?)<\/text>/gi, (_full, attrs, inner) => {
+    const slotKey = `svg:${idx++}`;
+    const plainBase = unescapeXml(inner.replace(/<[^>]+>/g, '')).trim();
+    const override = textOverrides?.[slotKey] ?? (plainBase ? textOverrides?.[`text:${plainBase}`] : undefined);
+    const nextInner = override !== undefined ? escapeXml(String(override)) : inner;
+    return `<text data-chart-text-slot="${slotKey}"${attrs}>${nextInner}</text>`;
+  });
+}
+
 function renderLegendSvg(legendItems, maxWidth, yOffset, resolvedTheme) {
   if (!Array.isArray(legendItems) || legendItems.length === 0) return '';
   let cursorX = 0;
   const parts = [];
-  for (const item of legendItems.slice(0, 6)) {
+  for (let idx = 0; idx < Math.min(legendItems.length, 6); idx++) {
+    const item = legendItems[idx];
     const label = String(item?.label ?? '');
     if (!label) continue;
     const itemWidth = Math.ceil(textWidth(label, 11) + 22);
@@ -255,7 +277,7 @@ function renderLegendSvg(legendItems, maxWidth, yOffset, resolvedTheme) {
     parts.push(
       `<g transform="translate(${cursorX},${yOffset})">` +
       `<rect x="0" y="2" width="9" height="9" rx="2.5" fill="${escapeXml(swatchColor)}"/>` +
-      `<text x="14" y="10" font-size="11" font-weight="500" fill="${escapeXml(resolvedTheme.muted)}">${escapeXml(label)}</text>` +
+      `<text data-chart-text-slot="legend:${idx}" x="14" y="10" font-size="11" font-weight="500" fill="${escapeXml(resolvedTheme.muted)}">${escapeXml(label)}</text>` +
       `</g>`,
     );
     cursorX += itemWidth;
@@ -289,6 +311,7 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
     title,
     subtitle,
     takeaway,
+    textOverrides,
     legendItems,
   } = resolved;
 
@@ -328,7 +351,7 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
   const viewBoxMatch = svgMatch?.[1]?.match(/viewBox="([^"]+)"/i);
   const viewBox = viewBoxMatch?.[1] ?? `0 0 ${plotWidth} ${plotHeight}`;
   const innerPlotSvg = svgMatch?.[2]
-    ? inlineZtdCssVariables(svgMatch[2], resolvedTheme)
+    ? applySvgTextOverrides(inlineZtdCssVariables(svgMatch[2], resolvedTheme), textOverrides)
     : '';
 
   const clipId = `ztd-card-clip-${safeId}`;

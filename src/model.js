@@ -225,6 +225,7 @@ export function resolveChartSpec(rawProps = {}) {
   const customRows = cloneJsonRows(rawProps.data);
   const customEncoding = isPlainRecord(rawProps.encoding) ? { ...rawProps.encoding } : {};
   const customOptions = isPlainRecord(rawProps.options) ? { ...rawProps.options } : {};
+  const textOverrides = isPlainRecord(customOptions.textOverrides) ? { ...customOptions.textOverrides } : {};
 
   let effectiveRows = example.data;
   let effectiveEncoding = { ...(example.encoding ?? {}) };
@@ -261,23 +262,41 @@ export function resolveChartSpec(rawProps = {}) {
     }
   }
 
-  const title = typeof rawProps.title === 'string' && rawProps.title.trim()
-    ? rawProps.title.trim()
-    : (example.card?.title ?? def.name ?? chartType);
-  const subtitle = typeof rawProps.subtitle === 'string' && rawProps.subtitle.trim()
-    ? rawProps.subtitle.trim()
-    : (example.card?.subtitle ?? '');
-  const takeaway = typeof rawProps.takeaway === 'string' && rawProps.takeaway.trim()
-    ? rawProps.takeaway.trim()
-    : (usingSampleData ? (example.card?.takeaway ?? '') : '');
+  const title = textOverrides['field:title'] !== undefined
+    ? String(textOverrides['field:title'])
+    : typeof rawProps.title === 'string' && rawProps.title.length > 0
+      ? rawProps.title
+      : (example.card?.title ?? def.name ?? chartType);
+  const subtitle = textOverrides['field:subtitle'] !== undefined
+    ? String(textOverrides['field:subtitle'])
+    : typeof rawProps.subtitle === 'string' && rawProps.subtitle.length > 0
+      ? rawProps.subtitle
+      : (example.card?.subtitle ?? '');
+  const takeaway = textOverrides['field:takeaway'] !== undefined
+    ? String(textOverrides['field:takeaway'])
+    : typeof rawProps.takeaway === 'string' && rawProps.takeaway.length > 0
+      ? rawProps.takeaway
+      : (usingSampleData ? (example.card?.takeaway ?? '') : '');
+  const cardNumber = textOverrides['field:cardNumber'] !== undefined
+    ? String(textOverrides['field:cardNumber'])
+    : customOptions.cardNumber !== undefined
+      ? String(customOptions.cardNumber)
+      : (example.card?.number !== undefined ? String(example.card.number) : '');
+  const cardLevel = textOverrides['field:cardLevel'] !== undefined
+    ? String(textOverrides['field:cardLevel'])
+    : customOptions.cardLevel !== undefined
+      ? String(customOptions.cardLevel)
+      : (example.card?.level !== undefined ? String(example.card.level) : '');
 
   const cardLegend = legendMode === 'false' ? false : 'auto';
   const card = variant === 'card'
     ? {
         ...(example.card ?? {}),
+        number: cardNumber || undefined,
         title,
         subtitle: subtitle || undefined,
         takeaway: takeaway || undefined,
+        level: cardLevel ? (example.card?.level ?? '기본') : undefined,
         legend: cardLegend,
         replay: false,
       }
@@ -295,7 +314,13 @@ export function resolveChartSpec(rawProps = {}) {
   if (variant === 'card' && legendMode !== 'false') {
     try {
       const computed = autoLegend(spec, effectiveRows, localeTag);
-      if (Array.isArray(computed)) legendItems = computed;
+      if (Array.isArray(computed)) {
+        legendItems = computed.map((item, idx) => {
+          const baseLabel = String(item?.label ?? '');
+          const override = textOverrides[`legend:${idx}`] ?? textOverrides[`text:${baseLabel}`];
+          return override !== undefined ? { ...item, label: String(override) } : item;
+        });
+      }
     } catch {
       legendItems = [];
     }
@@ -313,6 +338,9 @@ export function resolveChartSpec(rawProps = {}) {
     title,
     subtitle,
     takeaway,
+    cardNumber,
+    cardLevel,
+    textOverrides,
     usingSampleData,
     spec,
     bareSpec: {

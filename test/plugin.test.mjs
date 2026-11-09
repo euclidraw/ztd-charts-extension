@@ -394,7 +394,9 @@ test('inline editor supports double-click and Enter editing for title, subtitle,
     titleEl.textContent = '초기 제목';
     const svgTextEl = makeSyntheticElement('text', syntheticDoc);
     svgTextEl.textContent = '서울';
-    islandEl.append(titleEl, svgTextEl);
+    const axisTickEl = makeSyntheticElement('text', syntheticDoc);
+    axisTickEl.textContent = '50';
+    islandEl.append(titleEl, svgTextEl, axisTickEl);
     surfaceEl.append(islandEl);
 
     let historyChanges = 0;
@@ -441,11 +443,16 @@ test('inline editor supports double-click and Enter editing for title, subtitle,
       },
     });
 
-    // Double-click title -> edit with Korean IME composition -> Tab to subtitle -> Enter
+    // Double-click title -> zero-chrome transparent input -> edit with Korean IME composition
     surfaceEl.dispatch('dblclick', { target: titleEl, clientX: 120, clientY: 120 });
     const container = hudEl.children[0];
-    const input = container.children[1];
+    assert.equal(container.children.length, 1, 'no separate floating badge element');
+    const input = container.children[0];
     assert.equal(container.style.display, 'block');
+    assert.equal(input.style.background, 'transparent');
+    assert.equal(input.style.border, 'none');
+    assert.equal(input.style.outline, 'none');
+    assert.equal(titleEl.style.opacity, '0', 'underlying text is hidden while editing in place');
     assert.equal(input.value, '초기 제목');
 
     input.dispatch('compositionstart');
@@ -459,13 +466,26 @@ test('inline editor supports double-click and Enter editing for title, subtitle,
 
     // Double-click SVG text ("서울") -> updates data row cell in place
     surfaceEl.dispatch('dblclick', { target: svgTextEl, clientX: 180, clientY: 220 });
+    assert.equal(titleEl.style.opacity, '', 'previous target opacity restored');
+    assert.equal(svgTextEl.style.opacity, '0');
     assert.equal(input.value, '서울');
     input.value = ' 수도권 ';
     input.dispatch('input');
     input.dispatch('keydown', { key: 'Enter' });
     assert.equal(container.style.display, 'none');
+    assert.equal(svgTextEl.style.opacity, '');
     assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).data[0].region, ' 수도권 ');
     assert.ok(historySeals >= 1);
+
+    // Double-click arbitrary non-data SVG text (axis tick "50") -> updates textOverrides and SVG output
+    surfaceEl.dispatch('dblclick', { target: axisTickEl, clientX: 110, clientY: 200 });
+    assert.equal(input.value, '50');
+    input.value = '50억';
+    input.dispatch('input');
+    input.dispatch('keydown', { key: 'Enter' });
+    assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).options.textOverrides['svg:1'], '50억');
+    const { svg } = renderChartSvg(world.getCanonical(chartId, CHART_ASPECT_ID), { x: 0, y: 0, width: 480, height: 340, rotation: 0 }, chartId);
+    assert.ok(svg.includes('50억'));
 
     editor.dispose();
   } finally {
