@@ -1,0 +1,102 @@
+{
+  "apiVersion": 2,
+  "id": "diagram.ztd-charts",
+  "settingsSchema": [
+    {
+      "key": "defaultTheme",
+      "label": "기본 차트 테마",
+      "kind": "select",
+      "defaultValue": "light",
+      "options": [
+        {
+          "value": "light",
+          "label": "라이트"
+        },
+        {
+          "value": "dark",
+          "label": "다크"
+        }
+      ]
+    },
+    {
+      "key": "defaultLocale",
+      "label": "기본 차트 언어",
+      "kind": "select",
+      "defaultValue": "ko",
+      "options": [
+        {
+          "value": "ko",
+          "label": "한국어"
+        },
+        {
+          "value": "en",
+          "label": "English"
+        }
+      ]
+    },
+    {
+      "key": "defaultVariant",
+      "label": "기본 표시 형태",
+      "kind": "select",
+      "defaultValue": "card",
+      "options": [
+        {
+          "value": "card",
+          "label": "카드형 (제목·범례·요약 포함)"
+        },
+        {
+          "value": "bare",
+          "label": "차트만 표시"
+        }
+      ]
+    }
+  ],
+  "version": "0.1.0",
+  "engine": "^0.1.1",
+  "dependencies": {},
+  "optionalDependencies": {},
+  "conflicts": [],
+  "provides": {
+    "services": [],
+    "aspects": [
+      "diagram.ztd-charts.chart"
+    ],
+    "hsmSlots": []
+  },
+  "title": "ZTD 차트",
+  "summary": "36종의 zero-dependency 통계·비즈니스 차트를 캔버스 도형, 정적 SVG, 데이터 스튜디오 패널 및 코파일럿 도구로 제공하는 확장",
+  "entry": "dist/plugin.js",
+  "sha256": "8fabd8ab01abd0ee33a46b68223f8e4176f9963af9889168db39bc4a09b4b15c",
+  "aspectIds": [
+    "diagram.ztd-charts.chart"
+  ],
+  "capabilities": {
+    "readAspects": [
+      "diagram.ztd-charts.chart",
+      "core.transform",
+      "core.bounds"
+    ],
+    "writeAspects": [
+      "diagram.ztd-charts.chart",
+      "core.transform",
+      "core.bounds"
+    ],
+    "services": [
+      "canvas.creation",
+      "canvas.active-tool-surface",
+      "canvas.frames",
+      "extensions.preferences",
+      "workspace.tools"
+    ],
+    "commands": [
+      "diagram.ztd-charts:insert-chart",
+      "diagram.ztd-charts:set-chart-type",
+      "diagram.ztd-charts:update-data",
+      "diagram.ztd-charts:reset-sample-data",
+      "diagram.ztd-charts:apply-top-suggestion",
+      "diagram.ztd-charts:toggle-theme",
+      "diagram.ztd-charts:toggle-variant",
+      "diagram.ztd-charts:toggle-locale"
+    ]
+  }
+}
