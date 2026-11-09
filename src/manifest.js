@@ -9,6 +9,7 @@ export const COMMAND_NAMES = Object.freeze([
   'edit-chart',
   'set-chart-type',
   'update-data',
+  'update-style',
   'reset-sample-data',
   'apply-top-suggestion',
   'toggle-theme',

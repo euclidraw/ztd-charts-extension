@@ -1,6 +1,6 @@
 import React from 'react';
 import { Chart, ThemeProvider, textWidth } from 'ztd-charts';
-import { DEFAULT_CHART_HEIGHT, DEFAULT_CHART_WIDTH, resolveChartSpec } from './model.js';
+import { DEFAULT_CHART_HEIGHT, DEFAULT_CHART_WIDTH, resolveChartSpec, resolveColorForZtdKey } from './model.js';
 
 const SVG_CAMEL_ATTRS = new Set([
   'viewBox',
@@ -105,11 +105,11 @@ function getReactInternals() {
  * Synchronous, zero-CJS static React element serializer tailored for `ztd-charts`.
  * Avoids `react-dom/server` so the ESM bundle never emits CommonJS `require("react")`.
  */
-export function renderStaticElement(rootElement, idPrefix = 'ztd') {
+export function renderStaticElement(rootElement, idPrefix = 'ztd', colorContext = null) {
   const internals = getReactInternals();
   let idCounter = 0;
 
-  function renderComponent(Component, props, contextMap) {
+  function renderComponent(Component, props, contextMap, activeColor, inheritedKey) {
     const dispatcher = {
       useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}],
       useReducer: (_reducer, initArg, init) => [typeof init === 'function' ? init(initArg) : initArg, () => {}],
@@ -136,58 +136,104 @@ export function renderStaticElement(rootElement, idPrefix = 'ztd') {
 
     try {
       const rendered = Component(props);
-      return walk(rendered, contextMap);
+      return walk(rendered, contextMap, activeColor, inheritedKey);
     } finally {
       if (usesModernField) internals.H = previous;
       else if (internals) internals.current = previous;
     }
   }
 
-  function walk(node, contextMap) {
+  function walk(node, contextMap, activeColor = null, inheritedKey = '') {
     if (node === null || node === undefined || typeof node === 'boolean') return '';
     if (typeof node === 'string' || typeof node === 'number') return escapeXml(node);
     if (Array.isArray(node)) {
       let out = '';
-      for (const child of node) out += walk(child, contextMap);
+      for (const child of node) out += walk(child, contextMap, activeColor, '');
       return out;
     }
     if (typeof node === 'object' && node.$$typeof) {
-      const { type, props } = node;
+      const { type, props, key } = node;
+      const ownKey = key !== null && key !== undefined ? String(key) : inheritedKey;
       if (type === React.Fragment) {
-        return walk(props?.children, contextMap);
+        return walk(props?.children, contextMap, activeColor, ownKey);
       }
       if (typeof type === 'object' && type !== null) {
         if ('value' in (props ?? {}) && ('_context' in type || '_currentValue' in type || 'Provider' in type)) {
           const ctx = type._context ?? type;
           const nextMap = new Map(contextMap);
           nextMap.set(ctx, props.value);
-          return walk(props.children, nextMap);
+          return walk(props.children, nextMap, activeColor, ownKey);
         }
         if (typeof type.render === 'function') {
-          return renderComponent(p => type.render(p, null), props, contextMap);
+          return renderComponent(p => type.render(p, null), props, contextMap, activeColor, ownKey);
         }
         if (typeof type.type === 'function') {
-          return renderComponent(type.type, props, contextMap);
+          return renderComponent(type.type, props, contextMap, activeColor, ownKey);
         }
       }
       if (typeof type === 'function') {
-        return renderComponent(type, props ?? {}, contextMap);
+        return renderComponent(type, props ?? {}, contextMap, activeColor, ownKey);
       }
       if (typeof type === 'string') {
         const { children, dangerouslySetInnerHTML, style, ...rest } = props ?? {};
+        const isMark = typeof rest.className === 'string' && rest.className.includes('ztd-mark');
+        const matchedColor = colorContext
+          ? resolveColorForZtdKey(
+              colorContext.chartType,
+              ownKey,
+              rest['data-k'],
+              isMark,
+              colorContext.itemColors,
+              colorContext.dataTargets,
+              colorContext.rows,
+              colorContext.encoding,
+            )
+          : null;
+        const effectiveColor = matchedColor || activeColor;
+
+        if (effectiveColor && ['path', 'rect', 'circle', 'line', 'polygon'].includes(type)) {
+          const isBulletBgOrTarget =
+            colorContext?.chartType === 'bullet'
+            && (type === 'line' || (type === 'path' && ownKey && /^\d+$/.test(ownKey)));
+          const isBoxWhisker = colorContext?.chartType === 'box' && type === 'line';
+          if (!isBulletBgOrTarget && !isBoxWhisker && rest.fill !== 'transparent') {
+            if (
+              typeof rest.fill === 'string'
+              && rest.fill !== 'none'
+              && rest.fill !== 'transparent'
+              && !rest.fill.includes('--ztd-panel')
+            ) {
+              rest.fill = effectiveColor;
+            }
+            if (
+              typeof rest.stroke === 'string'
+              && rest.stroke !== 'none'
+              && !rest.stroke.includes('--ztd-panel')
+              && !rest.stroke.includes('--ztd-line')
+              && !rest.stroke.includes('--ztd-dim')
+              && !rest.stroke.includes('--ztd-neutral-soft')
+            ) {
+              rest.stroke = effectiveColor;
+            }
+          }
+        }
+
         let attrString = '';
-        for (const [key, val] of Object.entries(rest)) {
+        if (ownKey) {
+          attrString += ` data-ztd-key="${escapeXml(ownKey)}"`;
+        }
+        for (const [propKey, val] of Object.entries(rest)) {
           if (
             val === null
             || val === undefined
             || val === false
             || typeof val === 'function'
-            || key === 'ref'
-            || key === 'key'
+            || propKey === 'ref'
+            || propKey === 'key'
           ) {
             continue;
           }
-          const attrName = toAttributeName(key);
+          const attrName = toAttributeName(propKey);
           const attrVal = val === true ? '' : String(val);
           attrString += ` ${attrName}="${escapeXml(attrVal)}"`;
         }
@@ -197,14 +243,14 @@ export function renderStaticElement(rootElement, idPrefix = 'ztd') {
         }
         const inner = dangerouslySetInnerHTML?.__html !== undefined
           ? String(dangerouslySetInnerHTML.__html)
-          : walk(children, contextMap);
+          : walk(children, contextMap, effectiveColor, '');
         return `<${type}${attrString}>${inner}</${type}>`;
       }
     }
     return '';
   }
 
-  return walk(rootElement, new Map());
+  return walk(rootElement, new Map(), null, '');
 }
 
 /**
@@ -264,6 +310,13 @@ function applySvgTextOverrides(svgContent, textOverrides) {
 
 function renderLegendSvg(legendItems, maxWidth, yOffset, resolvedTheme) {
   if (!Array.isArray(legendItems) || legendItems.length === 0) return '';
+  const tokenColorMap = {
+    accent: resolvedTheme.accent,
+    neutral: resolvedTheme.neutral,
+    neutralStrong: resolvedTheme.neutralStrong,
+    neutralSoft: resolvedTheme.neutralSoft,
+    ink: resolvedTheme.ink,
+  };
   let cursorX = 0;
   const parts = [];
   for (let idx = 0; idx < Math.min(legendItems.length, 6); idx++) {
@@ -272,7 +325,7 @@ function renderLegendSvg(legendItems, maxWidth, yOffset, resolvedTheme) {
     if (!label) continue;
     const itemWidth = Math.ceil(textWidth(label, 11) + 22);
     if (cursorX > 0 && cursorX + itemWidth > maxWidth) break;
-    const rawColor = item?.color || resolvedTheme.accent;
+    const rawColor = tokenColorMap[item?.color] || item?.color || resolvedTheme.accent;
     const swatchColor = inlineZtdCssVariables(String(rawColor), resolvedTheme);
     parts.push(
       `<g transform="translate(${cursorX},${yOffset})">` +
@@ -346,7 +399,13 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
     }),
   );
 
-  const rawHtml = renderStaticElement(tree, `ztd-${safeId}`);
+  const rawHtml = renderStaticElement(tree, `ztd-${safeId}`, {
+    chartType: resolved.chartType,
+    itemColors: resolved.itemColors,
+    dataTargets: resolved.dataTargets,
+    rows: bareSpec.data,
+    encoding: bareSpec.encoding,
+  });
   const svgMatch = rawHtml.match(/<svg([^>]*)>([\s\S]*?)<\/svg>/i);
   const viewBoxMatch = svgMatch?.[1]?.match(/viewBox="([^"]+)"/i);
   const viewBox = viewBoxMatch?.[1] ?? `0 0 ${plotWidth} ${plotHeight}`;

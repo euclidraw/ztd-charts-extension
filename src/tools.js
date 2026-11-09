@@ -9,10 +9,12 @@ import {
   MIN_CHART_HEIGHT,
   MIN_CHART_WIDTH,
   getChartCatalog,
+  isValidHexColor,
   normalizeChartType,
   normalizeLang,
   parseDataInput,
   resolveChartSpec,
+  sanitizeItemColors,
   suggestChartsForRows,
 } from './model.js';
 
@@ -70,10 +72,19 @@ function sanitizePatch(rawPatch, existingProps = CHART_DEFAULTS) {
     clean.legendMode = rawPatch.legendMode;
   }
   if (rawPatch.accentColor !== undefined) {
-    if (typeof rawPatch.accentColor !== 'string' || !/^#[0-9a-f]{6}$/i.test(rawPatch.accentColor)) {
+    if (!isValidHexColor(rawPatch.accentColor)) {
       throw new Error('INVALID_INPUT: accentColor must be a #rrggbb hex string');
     }
-    clean.accentColor = rawPatch.accentColor;
+    clean.accentColor = rawPatch.accentColor.trim();
+  }
+  if (rawPatch.backgroundColor !== undefined) {
+    if (rawPatch.backgroundColor === '') {
+      clean.backgroundColor = '';
+    } else if (!isValidHexColor(rawPatch.backgroundColor)) {
+      throw new Error('INVALID_INPUT: backgroundColor must be "" or a #rrggbb hex string');
+    } else {
+      clean.backgroundColor = rawPatch.backgroundColor.trim();
+    }
   }
   if (rawPatch.data !== undefined) {
     if (typeof rawPatch.data === 'string') {
@@ -98,7 +109,31 @@ function sanitizePatch(rawPatch, existingProps = CHART_DEFAULTS) {
     if (!isPlainObject(rawPatch.options)) {
       throw new Error('INVALID_INPUT: options must be an object');
     }
-    clean.options = { ...rawPatch.options };
+    clean.options = { ...(existingProps.options ?? {}), ...rawPatch.options };
+    if (clean.options.itemColors !== undefined) {
+      clean.options.itemColors = sanitizeItemColors(clean.options.itemColors);
+    }
+  }
+  if (rawPatch.highlight !== undefined) {
+    clean.options = { ...(clean.options ?? existingProps.options ?? {}), highlight: rawPatch.highlight };
+  }
+  if (rawPatch.neutralColor !== undefined) {
+    if (rawPatch.neutralColor !== '' && !isValidHexColor(rawPatch.neutralColor)) {
+      throw new Error('INVALID_INPUT: neutralColor must be "" or a #rrggbb hex string');
+    }
+    const nextOpts = { ...(clean.options ?? existingProps.options ?? {}) };
+    if (rawPatch.neutralColor === '') delete nextOpts.neutralColor;
+    else nextOpts.neutralColor = rawPatch.neutralColor.trim();
+    clean.options = nextOpts;
+  }
+  if (rawPatch.itemColors !== undefined) {
+    if (!isPlainObject(rawPatch.itemColors)) {
+      throw new Error('INVALID_INPUT: itemColors must be an object mapping data labels/keys to #rrggbb hex colors');
+    }
+    clean.options = {
+      ...(clean.options ?? existingProps.options ?? {}),
+      itemColors: sanitizeItemColors(rawPatch.itemColors),
+    };
   }
 
   return clean;
@@ -278,9 +313,11 @@ export function registerZtdChartTools(context) {
             variant: `Allowed: ${ALLOWED_VARIANTS.join(', ')}`,
             legendMode: `Allowed: ${ALLOWED_LEGENDS.join(', ')}`,
             accentColor: 'string (#rrggbb): 강조 계열 색상',
+            backgroundColor: 'string (#rrggbb or ""): 차트 카드 배경 색상',
             data: 'array of row objects (비워 두면 해당 차트 유형의 내장 샘플 데이터 사용)',
             encoding: 'object: 데이터 컬럼 매핑 (예: { x, y, series } 또는 { label, value })',
-            options: 'object: 차트별 세부 옵션 (layout, orientation, curve, area 등)',
+            options:
+              'object: 차트별 세부 옵션 (highlight: "auto"|"max"|"min"|"first"|"last"|"none"|string|string[], neutralColor: "#rrggbb", itemColors: { [label]: "#rrggbb" } 등)',
           },
         }),
       );

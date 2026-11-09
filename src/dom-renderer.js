@@ -1,7 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Chart, ThemeProvider, baseCss, themeToCss } from 'ztd-charts';
-import { DEFAULT_CHART_HEIGHT, DEFAULT_CHART_WIDTH, resolveChartSpec } from './model.js';
+import { DEFAULT_CHART_HEIGHT, DEFAULT_CHART_WIDTH, resolveChartSpec, resolveColorForZtdKey } from './model.js';
 import { renderChartSvg } from './svg-renderer.js';
 
 const mountedRoots = new WeakMap();
@@ -29,12 +29,127 @@ function ensureDocumentBaseCss(doc) {
   }
 }
 
-function ChartIslandContent({ activeSpec, variant, plotWidth, plotHeight, localeTag, textOverrides, cardNumber, cardLevel, hostEl }) {
+function getElementZtdKey(el) {
+  if (!el || typeof el.getAttribute !== 'function') return '';
+  const existing = el.getAttribute('data-ztd-key');
+  if (existing) return existing;
+  const keys = Object.keys(el);
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    if (k.startsWith('__reactFiber$')) {
+      const fiber = el[k];
+      const ownKey = fiber?.key ?? (
+        fiber?.return && typeof fiber.return.type !== 'string' ? fiber.return.key : null
+      );
+      if (ownKey !== null && ownKey !== undefined && ownKey !== '') {
+        const keyStr = String(ownKey);
+        el.setAttribute('data-ztd-key', keyStr);
+        return keyStr;
+      }
+      break;
+    }
+  }
+  return '';
+}
+
+function applyDomCustomColors(root, resolved) {
+  if (!root || !resolved || typeof root.querySelector !== 'function') return;
+  const svgEl = root.querySelector('svg.ztd-svg') ?? root.querySelector('svg');
+  if (!svgEl) return;
+
+  const itemColors = resolved.itemColors ?? {};
+  const hasCustom = Object.keys(itemColors).length > 0;
+
+  function walkSvgNode(el, inheritedColor) {
+    if (!el || el.nodeType !== 1) return;
+    const tag = (el.tagName || '').toLowerCase();
+    const ztdKey = getElementZtdKey(el);
+    const dataK = el.getAttribute?.('data-k');
+    const cls = el.getAttribute?.('class') || '';
+    const isMark = cls.includes('ztd-mark');
+
+    const ownColor = hasCustom
+      ? resolveColorForZtdKey(
+          resolved.chartType,
+          ztdKey,
+          dataK,
+          isMark,
+          itemColors,
+          resolved.dataTargets,
+          resolved.spec?.data,
+          resolved.spec?.encoding,
+        )
+      : null;
+    const effectiveColor = ownColor || inheritedColor;
+
+    if (['path', 'rect', 'circle', 'line', 'polygon'].includes(tag)) {
+      const isBulletBgOrTarget =
+        resolved.chartType === 'bullet'
+        && (tag === 'line' || (tag === 'path' && ztdKey && /^\d+$/.test(ztdKey)));
+      const isBoxWhisker = resolved.chartType === 'box' && tag === 'line';
+      const currentFill = el.getAttribute('fill');
+      const currentStroke = el.getAttribute('stroke');
+
+      if (effectiveColor && !isBulletBgOrTarget && !isBoxWhisker && currentFill !== 'transparent') {
+        if (
+          typeof currentFill === 'string'
+          && currentFill !== 'none'
+          && currentFill !== 'transparent'
+          && !currentFill.includes('--ztd-panel')
+        ) {
+          if (!el.hasAttribute('data-orig-fill')) {
+            el.setAttribute('data-orig-fill', currentFill);
+          }
+          if (currentFill !== effectiveColor) {
+            el.setAttribute('fill', effectiveColor);
+          }
+        }
+        if (
+          typeof currentStroke === 'string'
+          && currentStroke !== 'none'
+          && !currentStroke.includes('--ztd-panel')
+          && !currentStroke.includes('--ztd-line')
+          && !currentStroke.includes('--ztd-dim')
+          && !currentStroke.includes('--ztd-neutral-soft')
+        ) {
+          if (!el.hasAttribute('data-orig-stroke')) {
+            el.setAttribute('data-orig-stroke', currentStroke);
+          }
+          if (currentStroke !== effectiveColor) {
+            el.setAttribute('stroke', effectiveColor);
+          }
+        }
+      } else {
+        if (el.hasAttribute('data-orig-fill')) {
+          el.setAttribute('fill', el.getAttribute('data-orig-fill'));
+          el.removeAttribute('data-orig-fill');
+        }
+        if (el.hasAttribute('data-orig-stroke')) {
+          el.setAttribute('stroke', el.getAttribute('data-orig-stroke'));
+          el.removeAttribute('data-orig-stroke');
+        }
+      }
+    }
+
+    const children = el.children;
+    if (children) {
+      for (let i = 0; i < children.length; i++) {
+        walkSvgNode(children[i], effectiveColor);
+      }
+    }
+  }
+
+  walkSvgNode(svgEl, null);
+}
+
+function ChartIslandContent({ activeSpec, resolved, variant, plotWidth, plotHeight, localeTag, textOverrides, cardNumber, cardLevel, hostEl }) {
   const wrapRef = React.useRef(null);
 
   React.useLayoutEffect(() => {
     const root = wrapRef.current;
     if (!root || typeof root.querySelector !== 'function') return;
+
+    applyDomCustomColors(root, resolved);
 
     const headerRows = root.querySelectorAll?.('.ztd-card > header > div') ?? [];
     const firstHeaderRow = headerRows[0];
@@ -130,6 +245,28 @@ function ChartIslandContent({ activeSpec, variant, plotWidth, plotHeight, locale
         delete el.dataset.hiddenByEditor;
       }
     }
+
+    if (
+      resolved?.itemColors
+      && Object.keys(resolved.itemColors).length > 0
+      && typeof MutationObserver === 'function'
+    ) {
+      let applying = false;
+      const observer = new MutationObserver(() => {
+        if (applying) return;
+        applying = true;
+        try {
+          applyDomCustomColors(root, resolved);
+        } finally {
+          applying = false;
+        }
+      });
+      const svgEl = root.querySelector('svg');
+      if (svgEl) {
+        observer.observe(svgEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['fill', 'stroke'] });
+        return () => observer.disconnect();
+      }
+    }
   });
 
   return React.createElement(
@@ -194,6 +331,7 @@ export function renderChartDom(hostEl, props, derived, entityId = 'chart') {
     hostEl.dataset.chartTheme = themeName;
     hostEl.dataset.chartVariant = variant;
     hostEl.dataset.chartTitle = title;
+    hostEl.dataset.chartBackground = resolved.backgroundColor || '';
   }
 
   const themeVars = themeToCss(resolvedTheme);
@@ -241,6 +379,7 @@ export function renderChartDom(hostEl, props, derived, entityId = 'chart') {
     { theme: resolvedTheme },
     React.createElement(ChartIslandContent, {
       activeSpec,
+      resolved,
       variant,
       plotWidth,
       plotHeight,

@@ -5,10 +5,12 @@ import plugin, {
   CHART_TYPES,
   EXTENSION_ID,
   deriveChartGeometry,
+  extractChartDataTargets,
   matchTextToChartData,
   mergeDraft,
   mountInlineEditor,
   parseDataInput,
+  planZtdChartChanges,
   renderChartDom,
   renderChartSvg,
   resolveChartSpec,
@@ -131,7 +133,7 @@ test('plugin commands create, switch type, update data, apply suggestions, and t
     },
   });
 
-  assert.equal(registeredCommands.size, 9);
+  assert.equal(registeredCommands.size, 10);
   assert.deepEqual(registeredCommands.get(`${EXTENSION_ID}:edit-chart`).keys, ['Enter']);
   assert.equal(registeredCommands.get(`${EXTENSION_ID}:edit-chart`).shortcutSelectionAspect, CHART_ASPECT_ID);
   const chartId = runtime.api.insertChart({ chartType: 'bar', title: '매출 현황' });
@@ -521,5 +523,177 @@ test('inline editor supports double-click and Enter editing for title, subtitle,
     globalThis.document = prevDoc;
   }
 });
+
+test('custom backgroundColor, highlight selection, neutralColor, and per-component itemColors work across SVG, DOM, commands, and Copilot tools', () => {
+  const rows = [
+    { channel: '검색', conversion: 42 },
+    { channel: '소셜', conversion: 68 },
+    { channel: '이메일', conversion: 29 },
+  ];
+
+  // 1. Background color with automatic luminance-aware contrast
+  const darkBgSpec = resolveChartSpec({
+    chartType: 'bar',
+    theme: 'light',
+    backgroundColor: '#0f172a',
+    accentColor: '#10b981',
+    data: rows,
+    options: {
+      neutralColor: '#475569',
+      highlight: '검색',
+      itemColors: {
+        이메일: '#f59e0b',
+      },
+    },
+  });
+  assert.equal(darkBgSpec.backgroundColor, '#0f172a');
+  assert.equal(darkBgSpec.resolvedTheme.panel, '#0f172a');
+  assert.equal(darkBgSpec.resolvedTheme.ink, '#F1F3F5', 'dark backgroundColor switches foreground text to light ink');
+  assert.equal(darkBgSpec.resolvedTheme.neutral, '#475569', 'custom neutralColor overrides theme neutral token');
+  assert.equal(darkBgSpec.highlight, '검색');
+  assert.deepEqual(darkBgSpec.dataTargets.items.map(i => i.key), ['검색', '소셜', '이메일']);
+
+  const { svg: barSvg } = renderChartSvg({
+    chartType: 'bar',
+    backgroundColor: '#0f172a',
+    accentColor: '#10b981',
+    data: rows,
+    options: {
+      neutralColor: '#475569',
+      highlight: '검색',
+      itemColors: {
+        이메일: '#f59e0b',
+      },
+    },
+  });
+  assert.ok(barSvg.includes('fill="#0f172a"'), 'card background rect uses custom backgroundColor');
+  assert.ok(barSvg.includes('fill="#10b981"'), 'highlighted bar ("검색") uses accentColor');
+  assert.ok(barSvg.includes('fill="#475569"'), 'non-highlighted bar ("소셜") uses custom neutralColor');
+  assert.ok(barSvg.includes('fill="#f59e0b"'), 'per-item custom color ("이메일") overrides bar fill');
+
+  // 2. Pie / Donut / Line / Candlestick per-component colors
+  const { svg: pieSvg } = renderChartSvg({
+    chartType: 'pie',
+    data: rows,
+    options: {
+      itemColors: {
+        검색: '#ef4444',
+        소셜: '#3b82f6',
+        이메일: '#8b5cf6',
+      },
+    },
+  });
+  assert.ok(pieSvg.includes('fill="#ef4444"'));
+  assert.ok(pieSvg.includes('fill="#3b82f6"'));
+  assert.ok(pieSvg.includes('fill="#8b5cf6"'));
+
+  const multiSeriesRows = [
+    { month: '1월', series: 'A팀', score: 80 },
+    { month: '2월', series: 'A팀', score: 90 },
+    { month: '1월', series: 'B팀', score: 70 },
+    { month: '2월', series: 'B팀', score: 85 },
+  ];
+  const { svg: lineSvg } = renderChartSvg({
+    chartType: 'line',
+    data: multiSeriesRows,
+    encoding: { x: 'month', y: 'score', series: 'series' },
+    options: {
+      itemColors: {
+        A팀: '#ec4899',
+        B팀: '#06b6d4',
+      },
+    },
+  });
+  assert.ok(lineSvg.includes('stroke="#ec4899"'));
+  assert.ok(lineSvg.includes('stroke="#06b6d4"'));
+
+  const { svg: candleSvg } = renderChartSvg({
+    chartType: 'candlestick',
+    options: {
+      itemColors: {
+        up: '#22c55e',
+        down: '#ef4444',
+      },
+    },
+  });
+  assert.ok(candleSvg.includes('#22c55e'));
+  assert.ok(candleSvg.includes('#ef4444'));
+
+  // 3. update-style command and planZtdChartChanges validation
+  const world = createMockWorld();
+  let selected = [];
+  const runtime = plugin.activate({
+    world,
+    commands: { register: () => () => {} },
+    services: {
+      get(name) {
+        if (name === 'canvas.active-tool-surface') {
+          return {
+            get: () => ({
+              selection: {
+                getSelection: () => selected,
+                select(id) {
+                  selected = [id];
+                },
+              },
+              host: { history: { begin() {}, commit() {}, abort() {} } },
+            }),
+          };
+        }
+        return undefined;
+      },
+    },
+  });
+
+  const chartId = runtime.api.insertChart({
+    chartType: 'bar',
+    backgroundColor: '#fffbeb',
+    highlight: ['검색', '소셜'],
+    itemColors: { 검색: '#ef4444' },
+  });
+  assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).backgroundColor, '#fffbeb');
+  assert.deepEqual(world.getCanonical(chartId, CHART_ASPECT_ID).options.highlight, ['검색', '소셜']);
+  assert.deepEqual(world.getCanonical(chartId, CHART_ASPECT_ID).options.itemColors, { 검색: '#ef4444' });
+
+  runtime.api.run('update-style', {
+    entityId: chartId,
+    backgroundColor: '#18181b',
+    accentColor: '#8b5cf6',
+    neutralColor: '#64748b',
+    highlight: 'min',
+    itemColors: { 소셜: '#10b981', 검색: '' },
+  });
+  const updated = world.getCanonical(chartId, CHART_ASPECT_ID);
+  assert.equal(updated.backgroundColor, '#18181b');
+  assert.equal(updated.accentColor, '#8b5cf6');
+  assert.equal(updated.options.neutralColor, '#64748b');
+  assert.equal(updated.options.highlight, 'min');
+  assert.deepEqual(updated.options.itemColors, { 소셜: '#10b981' });
+
+  const plannedOps = planZtdChartChanges(world, [
+    {
+      action: 'update',
+      id: chartId,
+      patch: {
+        backgroundColor: '#f0fdf4',
+        highlight: 'max',
+        neutralColor: '#94a3b8',
+        itemColors: { 이메일: '#06b6d4' },
+      },
+    },
+  ]);
+  const chartPatch = plannedOps.find(op => op.aspect === CHART_ASPECT_ID)?.patch;
+  assert.equal(chartPatch.backgroundColor, '#f0fdf4');
+  assert.equal(chartPatch.options.highlight, 'max');
+  assert.equal(chartPatch.options.neutralColor, '#94a3b8');
+  assert.deepEqual(chartPatch.options.itemColors, { 이메일: '#06b6d4' });
+
+  const targets = extractChartDataTargets('candlestick', [], {});
+  assert.equal(targets.kind, 'updown');
+  assert.equal(targets.items.length, 2);
+
+  runtime.dispose();
+});
+
 
 

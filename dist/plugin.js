@@ -4,7 +4,7 @@ import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 var extension_default = {
 	id: "diagram.ztd-charts",
 	title: "ZTD 차트",
-	version: "0.1.3",
+	version: "0.1.4",
 	summary: "36종의 zero-dependency 통계·비즈니스 차트를 캔버스 도형, 정적 SVG, 데이터 스튜디오 패널 및 코파일럿 도구로 제공하는 확장",
 	engine: "^0.1.1",
 	dependencies: {},
@@ -22858,10 +22858,52 @@ var CHART_DEFAULTS = Object.freeze({
 	variant: "card",
 	legendMode: "auto",
 	accentColor: "#3182f6",
+	backgroundColor: "",
 	data: [],
 	encoding: {},
 	options: {}
 });
+var HIGHLIGHT_PRESETS = Object.freeze([
+	{
+		id: "auto",
+		value: "auto",
+		labelKo: "자동",
+		labelEn: "Auto"
+	},
+	{
+		id: "max",
+		value: "max",
+		labelKo: "최댓값",
+		labelEn: "Max"
+	},
+	{
+		id: "min",
+		value: "min",
+		labelKo: "최솟값",
+		labelEn: "Min"
+	},
+	{
+		id: "first",
+		value: "first",
+		labelKo: "첫 항목",
+		labelEn: "First"
+	},
+	{
+		id: "last",
+		value: "last",
+		labelKo: "끝 항목",
+		labelEn: "Last"
+	},
+	{
+		id: "none",
+		value: "none",
+		labelKo: "없음",
+		labelEn: "None"
+	}
+]);
+function isValidHexColor(value) {
+	return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value.trim());
+}
 var CATALOG_CACHE = {
 	ko: Object.freeze(chartsIn("ko").map((def) => {
 		const canonical = getChartDef(def.type);
@@ -22909,12 +22951,36 @@ function getLocalizedChartDef(chartType, locale = "ko") {
 	const lang = normalizeLang(locale);
 	return localizeDef(getChartDef(safeType) ?? getChartDef("bar"), lang);
 }
-function resolveChartTheme(theme = "light", accentColor = "#3182f6") {
-	const baseTheme = resolveThemeInput(theme === "dark" ? "dark" : "light");
-	if (typeof accentColor === "string" && /^#[0-9a-f]{6}$/i.test(accentColor)) return resolveThemeInput({
-		accent: accentColor,
-		accentText: accentColor
-	}, baseTheme);
+function resolveChartTheme(theme = "light", accentColor = "#3182f6", backgroundColor = "", neutralColor = "") {
+	const validBg = isValidHexColor(backgroundColor) ? backgroundColor.trim() : "";
+	const validAccent = isValidHexColor(accentColor) ? accentColor.trim() : "";
+	const validNeutral = isValidHexColor(neutralColor) ? neutralColor.trim() : "";
+	const parsedBg = validBg ? parseColor(validBg) : null;
+	const baseName = parsedBg ? luminance(parsedBg) < .28 ? "dark" : "light" : theme === "dark" ? "dark" : "light";
+	const baseTheme = resolveThemeInput(baseName);
+	const customTokens = {};
+	if (validAccent) {
+		customTokens.accent = validAccent;
+		customTokens.accentText = validAccent;
+	}
+	if (validBg) {
+		customTokens.bg = validBg;
+		customTokens.panel = validBg;
+		customTokens.line = mixHex(validBg, baseTheme.ink, baseName === "dark" ? .14 : .11);
+		customTokens.line2 = mixHex(validBg, baseTheme.ink, baseName === "dark" ? .09 : .06);
+		customTokens.lift = mixHex(validBg, baseTheme.ink, baseName === "dark" ? .06 : .04);
+		customTokens.neutralSoft = mixHex(validBg, baseTheme.ink, baseName === "dark" ? .1 : .08);
+	}
+	if (validNeutral) {
+		const panelRef = validBg || baseTheme.panel;
+		customTokens.neutral = validNeutral;
+		customTokens.neutralStrong = mixHex(validNeutral, baseTheme.ink, .28);
+		customTokens.neutralSoft = mixHex(validNeutral, panelRef, .72);
+	}
+	if (Object.keys(customTokens).length > 0) return resolveThemeInput({
+		...baseTheme,
+		...customTokens
+	});
 	return baseTheme;
 }
 function isPlainRecord$1(value) {
@@ -23026,6 +23092,402 @@ function adaptEncodingForType(chartType, rows, currentEncoding, lang) {
 	return Object.keys(adapted).length > 0 ? adapted : null;
 }
 /**
+* Resolves highlighted indices in the same way as `ztd-charts`'s internal `resolveHighlight`.
+*/
+function resolveHighlightIndices(highlight, labels = [], values = [], fallback = "max") {
+	const out = /* @__PURE__ */ new Set();
+	const n = labels.length;
+	const pick = (mode) => {
+		if (!n || mode === "none") return;
+		if (mode === "first") out.add(0);
+		else if (mode === "last") out.add(n - 1);
+		else if (mode === "max" || mode === "min") {
+			let best = -1;
+			let bv = mode === "max" ? -Infinity : Infinity;
+			values.forEach((v, i) => {
+				const num = Number(v);
+				if (!Number.isFinite(num)) return;
+				if (mode === "max" ? num > bv : num < bv) {
+					bv = num;
+					best = i;
+				}
+			});
+			if (best >= 0) out.add(best);
+		}
+	};
+	if (highlight === void 0 || highlight === null || highlight === "" || highlight === "auto") {
+		pick(fallback);
+		return out;
+	}
+	const list = Array.isArray(highlight) ? highlight : [highlight];
+	for (const item of list) if (typeof item === "number") {
+		if (item >= 0 && item < n) out.add(item);
+	} else if (item === "max" || item === "min" || item === "first" || item === "last" || item === "none") pick(item);
+	else if (typeof item === "string") labels.forEach((l, i) => {
+		if (String(l) === item) out.add(i);
+	});
+	return out;
+}
+function sanitizeItemColors(rawItemColors) {
+	if (!isPlainRecord$1(rawItemColors)) return {};
+	const out = {};
+	for (const [k, v] of Object.entries(rawItemColors)) {
+		const key = String(k ?? "").trim();
+		if (!key || !isValidHexColor(v)) continue;
+		out[key] = v.trim();
+	}
+	return out;
+}
+function uniqueStrings(items) {
+	const seen = /* @__PURE__ */ new Set();
+	const out = [];
+	for (const item of items) {
+		const str = String(item ?? "").trim();
+		if (!str || seen.has(str)) continue;
+		seen.add(str);
+		out.push(str);
+	}
+	return out;
+}
+function defaultCategoricalSwatches(resolvedTheme, count, hiSet) {
+	const out = new Array(count);
+	const rest = [];
+	for (let i = 0; i < count; i++) if (hiSet.has(i)) out[i] = resolvedTheme.accent;
+	else rest.push(i);
+	const k = rest.length;
+	rest.forEach((idx, j) => {
+		if (k === 1) out[idx] = resolvedTheme.neutral;
+		else if (j === 0) out[idx] = resolvedTheme.ink;
+		else if (j === k - 1) out[idx] = resolvedTheme.neutral;
+		else if (k === 3) out[idx] = resolvedTheme.neutralStrong;
+		else {
+			const t = (j - 1) / Math.max(1, k - 2);
+			out[idx] = t <= .001 ? resolvedTheme.neutralStrong : mixHex(resolvedTheme.neutralStrong, resolvedTheme.neutral, 1 - t);
+		}
+	});
+	return out;
+}
+function attachTargetMetadata(items, kind = "category") {
+	const normalized = items.map((it) => ({
+		...it,
+		id: it.id ?? it.key,
+		key: it.key ?? it.id
+	}));
+	Object.defineProperty(normalized, "items", {
+		value: normalized,
+		enumerable: false
+	});
+	Object.defineProperty(normalized, "kind", {
+		value: kind,
+		enumerable: false
+	});
+	return normalized;
+}
+/**
+* Extracts selectable data components (series, categories, slices, nodes, or up/down)
+* for highlight selection and per-component color customization.
+*/
+function extractChartDataTargets(chartType, rows = [], encoding = {}, options = {}, resolvedTheme = resolveChartTheme("light"), localeTag = "ko-KR") {
+	const safeType = normalizeChartType(chartType);
+	const safeRows = Array.isArray(rows) ? rows : [];
+	const enc = isPlainRecord$1(encoding) ? encoding : {};
+	const opt = isPlainRecord$1(options) ? options : {};
+	const itemColors = sanitizeItemColors(opt.itemColors);
+	const lang = normalizeLang(localeTag);
+	if (safeType === "candlestick") {
+		const upCustom = isValidHexColor(opt.upColor) ? opt.upColor.trim() : itemColors.up;
+		const downCustom = isValidHexColor(opt.downColor) ? opt.downColor.trim() : itemColors.down;
+		return attachTargetMetadata([{
+			id: "up",
+			key: "up",
+			label: lang === "en" ? "Up (Bullish)" : "상승(양봉)",
+			kind: "candle",
+			defaultColor: resolvedTheme.accent,
+			customColor: upCustom || "",
+			effectiveColor: upCustom || resolvedTheme.accent,
+			highlighted: true
+		}, {
+			id: "down",
+			key: "down",
+			label: lang === "en" ? "Down (Bearish)" : "하락(음봉)",
+			kind: "candle",
+			defaultColor: resolvedTheme.neutralStrong,
+			customColor: downCustom || "",
+			effectiveColor: downCustom || resolvedTheme.neutralStrong,
+			highlighted: false
+		}], "updown");
+	}
+	const seriesCol = typeof enc.series === "string" ? enc.series : null;
+	const wideSeries = Array.isArray(enc.y) ? enc.y.map(String) : [];
+	const frontFields = Array.isArray(enc.front) ? enc.front.map(String) : typeof enc.front === "string" ? [enc.front] : [];
+	const backFields = Array.isArray(enc.back) ? enc.back.map(String) : typeof enc.back === "string" ? [enc.back] : [];
+	if (safeType === "skyline" && (backFields.length > 0 || frontFields.length > 0)) {
+		const names = uniqueStrings([...backFields, ...frontFields]);
+		const hiSet = resolveHighlightIndices(opt.highlight, names, names.map(() => 0), "first");
+		const defaults = defaultCategoricalSwatches(resolvedTheme, names.length, hiSet);
+		return attachTargetMetadata(names.map((name, i) => ({
+			id: name,
+			label: name,
+			kind: "series",
+			defaultColor: defaults[i] || resolvedTheme.neutral,
+			customColor: itemColors[name] || "",
+			effectiveColor: itemColors[name] || defaults[i] || resolvedTheme.neutral,
+			highlighted: hiSet.has(i)
+		})), "series");
+	}
+	let seriesList = [];
+	if (wideSeries.length >= 2) seriesList = wideSeries;
+	else if (seriesCol && safeRows.length > 0) seriesList = uniqueStrings(safeRows.map((r) => r?.[seriesCol]));
+	if (([
+		"line",
+		"area",
+		"stream",
+		"radar",
+		"bump",
+		"marimekko"
+	].includes(safeType) || [
+		"bar",
+		"scatter",
+		"bubble",
+		"histogram"
+	].includes(safeType) && seriesList.length >= 2) && seriesList.length >= 1) {
+		const valCol = typeof enc.y === "string" ? enc.y : typeof enc.value === "string" ? enc.value : "value";
+		const totals = seriesList.map((sName) => {
+			if (wideSeries.includes(sName)) return safeRows.reduce((acc, r) => acc + (Number(r?.[sName]) || 0), 0);
+			return safeRows.filter((r) => String(r?.[seriesCol] ?? "") === sName).reduce((acc, r) => acc + (Number(r?.[valCol]) || 0), 0);
+		});
+		const fallbackRule = ["stream", "bump"].includes(safeType) ? "max" : "first";
+		const hiSet = resolveHighlightIndices(opt.highlight, seriesList, totals, fallbackRule);
+		const defaults = [
+			"line",
+			"radar",
+			"bump"
+		].includes(safeType) ? seriesList.map((_, i) => hiSet.has(i) ? resolvedTheme.accent : resolvedTheme.neutralStrong) : defaultCategoricalSwatches(resolvedTheme, seriesList.length, hiSet);
+		return attachTargetMetadata(seriesList.map((name, i) => ({
+			id: name,
+			label: name,
+			kind: "series",
+			defaultColor: defaults[i] || resolvedTheme.neutral,
+			customColor: itemColors[name] || "",
+			effectiveColor: itemColors[name] || defaults[i] || resolvedTheme.neutral,
+			highlighted: hiSet.has(i)
+		})), "series");
+	}
+	const groupCol = typeof enc.group === "string" ? enc.group : null;
+	if ([
+		"ridgeline",
+		"box",
+		"beeswarm"
+	].includes(safeType) && groupCol) {
+		const groups = uniqueStrings(safeRows.map((r) => r?.[groupCol]));
+		const valCol = typeof enc.value === "string" ? enc.value : typeof enc.y === "string" ? enc.y : "value";
+		const groupVals = groups.map((g) => {
+			const nums = safeRows.filter((r) => String(r?.[groupCol] ?? "") === g).map((r) => Number(r?.[valCol])).filter(Number.isFinite).sort((a, b) => a - b);
+			return nums.length ? nums[Math.floor(nums.length / 2)] : 0;
+		});
+		const hiSet = resolveHighlightIndices(opt.highlight, groups, groupVals, "max");
+		return attachTargetMetadata(groups.map((name, i) => {
+			const defColor = hiSet.has(i) ? resolvedTheme.accent : resolvedTheme.neutralStrong;
+			return {
+				id: name,
+				label: name,
+				kind: "group",
+				defaultColor: defColor,
+				customColor: itemColors[name] || "",
+				effectiveColor: itemColors[name] || defColor,
+				highlighted: hiSet.has(i)
+			};
+		}), "group");
+	}
+	if (safeType === "sankey" || safeType === "chord") {
+		const srcCol = typeof enc.source === "string" ? enc.source : typeof enc.from === "string" ? enc.from : "source";
+		const tgtCol = typeof enc.target === "string" ? enc.target : typeof enc.to === "string" ? enc.to : "target";
+		const valCol = typeof enc.value === "string" ? enc.value : "value";
+		const nodes = uniqueStrings(safeRows.flatMap((r) => [r?.[srcCol], r?.[tgtCol]]));
+		const totals = nodes.map((n) => safeRows.reduce((acc, r) => String(r?.[srcCol] ?? "") === n || String(r?.[tgtCol] ?? "") === n ? acc + (Number(r?.[valCol]) || 0) : acc, 0));
+		const hiSet = resolveHighlightIndices(opt.highlight, nodes, totals, "max");
+		return attachTargetMetadata(nodes.map((name, i) => {
+			const defColor = hiSet.has(i) ? resolvedTheme.accent : resolvedTheme.ink;
+			return {
+				id: name,
+				label: name,
+				kind: "node",
+				defaultColor: defColor,
+				customColor: itemColors[name] || "",
+				effectiveColor: itemColors[name] || defColor,
+				highlighted: hiSet.has(i)
+			};
+		}), "node");
+	}
+	if (safeType === "treemap" || safeType === "sunburst") {
+		const labelCol = typeof enc.label === "string" ? enc.label : "label";
+		const parentCol = typeof enc.group === "string" ? enc.group : typeof enc.parent === "string" ? enc.parent : null;
+		const valCol = typeof enc.value === "string" ? enc.value : "value";
+		const items = [];
+		const vals = [];
+		for (const r of safeRows) {
+			const lbl = String(r?.[labelCol] ?? "").trim();
+			if (!lbl) continue;
+			const par = parentCol ? String(r?.[parentCol] ?? "").trim() : "";
+			items.push({
+				id: lbl,
+				label: par ? `${par} · ${lbl}` : lbl,
+				group: par
+			});
+			vals.push(Number(r?.[valCol]) || 0);
+		}
+		const labels = items.map((it) => it.id);
+		const hiSet = resolveHighlightIndices(opt.highlight, labels, vals, "max");
+		return attachTargetMetadata(items.map((it, i) => {
+			const custom = itemColors[it.id] || (it.group ? itemColors[it.group] : "") || "";
+			const defColor = hiSet.has(i) ? resolvedTheme.accent : resolvedTheme.neutral;
+			return {
+				id: it.id,
+				label: it.label,
+				kind: "item",
+				defaultColor: defColor,
+				customColor: custom,
+				effectiveColor: custom || defColor,
+				highlighted: hiSet.has(i)
+			};
+		}), "hierarchy");
+	}
+	const labelKey = enc.label || enc.x || enc.stage || enc.category || enc.item || (safeRows[0] ? Object.keys(safeRows[0]).find((k) => typeof safeRows[0][k] === "string") : "label") || "label";
+	const valueKey = (typeof enc.y === "string" ? enc.y : Array.isArray(enc.y) ? enc.y[0] : null) || enc.value || enc.end || enc.after || enc.size || (safeRows[0] ? Object.keys(safeRows[0]).find((k) => typeof safeRows[0][k] === "number") : "value") || "value";
+	const labels = [];
+	const values = [];
+	for (let i = 0; i < safeRows.length; i++) {
+		const row = safeRows[i];
+		const lbl = String(row?.[labelKey] ?? `${i + 1}`).trim();
+		if (!lbl) continue;
+		labels.push(lbl);
+		values.push(Number(row?.[valueKey]) || 0);
+	}
+	const displayLabels = uniqueStrings(labels).slice(0, 24);
+	const displayValues = displayLabels.map((lbl) => {
+		const idx = labels.indexOf(lbl);
+		return idx >= 0 ? values[idx] : 0;
+	});
+	const fallbackRule = safeType === "waffle" || safeType === "parallel" ? "first" : safeType === "bullet" ? "min" : "max";
+	const hiSet = resolveHighlightIndices(opt.highlight, displayLabels, displayValues, fallbackRule);
+	const defaults = (/* @__PURE__ */ new Set([
+		"pie",
+		"donut",
+		"waffle",
+		"segmented"
+	])).has(safeType) ? defaultCategoricalSwatches(resolvedTheme, displayLabels.length, hiSet) : displayLabels.map((_, i) => hiSet.has(i) ? resolvedTheme.accent : resolvedTheme.neutral);
+	return attachTargetMetadata(displayLabels.map((lbl, i) => ({
+		id: lbl,
+		label: lbl,
+		kind: "item",
+		defaultColor: defaults[i] || resolvedTheme.neutral,
+		customColor: itemColors[lbl] || "",
+		effectiveColor: itemColors[lbl] || defaults[i] || resolvedTheme.neutral,
+		highlighted: hiSet.has(i)
+	})), "category");
+}
+/**
+* Resolves a custom `#rrggbb` color for an SVG element given its `data-ztd-key` or `data-k`.
+*/
+function resolveColorForZtdKey(chartType, ztdKey, dataK, isMark, itemColors = {}, dataTargets = [], rows = [], encoding = {}) {
+	if (!isPlainRecord$1(itemColors) || Object.keys(itemColors).length === 0) return null;
+	const targetList = Array.isArray(dataTargets) ? dataTargets : dataTargets?.items ?? [];
+	if (dataK !== void 0 && dataK !== null && dataK !== "") {
+		const kIdx = Number(dataK);
+		if (Number.isFinite(kIdx) && kIdx >= 0 && targetList[kIdx]) {
+			const c = itemColors[targetList[kIdx].id ?? targetList[kIdx].key];
+			if (isValidHexColor(c)) return c;
+		}
+	}
+	const key = String(ztdKey ?? "").trim();
+	if (!key) return null;
+	if (isValidHexColor(itemColors[key])) return itemColors[key];
+	if (key.includes("|")) {
+		const [cat, series] = key.split("|");
+		if (series && isValidHexColor(itemColors[series])) return itemColors[series];
+		if (cat && isValidHexColor(itemColors[cat])) return itemColors[cat];
+		return null;
+	}
+	const bubbleMatch = key.match(/^b(\d+):(.*)$/);
+	if (bubbleMatch) {
+		const rowIdx = Number(bubbleMatch[1]);
+		const lbl = bubbleMatch[2];
+		if (lbl && isValidHexColor(itemColors[lbl])) return itemColors[lbl];
+		const seriesCol = typeof encoding?.series === "string" ? encoding.series : null;
+		if (seriesCol && rows[rowIdx]) {
+			const sVal = String(rows[rowIdx][seriesCol] ?? "");
+			if (sVal && isValidHexColor(itemColors[sVal])) return itemColors[sVal];
+		}
+		return null;
+	}
+	if (key.startsWith("t:") || key.startsWith("a:")) {
+		const body = key.slice(2);
+		if (isValidHexColor(itemColors[body])) return itemColors[body];
+		if (body.includes("/")) {
+			const [parent, leaf] = body.split("/");
+			if (leaf && isValidHexColor(itemColors[leaf])) return itemColors[leaf];
+			if (parent && isValidHexColor(itemColors[parent])) return itemColors[parent];
+		}
+		return null;
+	}
+	if (key.startsWith("n:")) {
+		const nodeName = key.slice(2);
+		return isValidHexColor(itemColors[nodeName]) ? itemColors[nodeName] : null;
+	}
+	if (key.startsWith("l:") && key.includes(">")) {
+		const linkBody = key.slice(2);
+		if (isValidHexColor(itemColors[linkBody])) return itemColors[linkBody];
+		const [src, tgt] = linkBody.split(">");
+		if (src && isValidHexColor(itemColors[src])) return itemColors[src];
+		if (tgt && isValidHexColor(itemColors[tgt])) return itemColors[tgt];
+		return null;
+	}
+	if (key.startsWith("p:")) {
+		const idx = Number(key.slice(2));
+		if (Number.isFinite(idx) && targetList[idx]) {
+			const c = itemColors[targetList[idx].id ?? targetList[idx].key];
+			if (isValidHexColor(c)) return c;
+		}
+		return null;
+	}
+	const prefixMatch = key.match(/^[srbwdl]:(.*)$/);
+	if (prefixMatch) {
+		const name = prefixMatch[1];
+		if (name && isValidHexColor(itemColors[name])) return itemColors[name];
+		return null;
+	}
+	if (chartType === "segmented" && /^l(\d+)$/.test(key)) {
+		const idx = Number(key.slice(1));
+		if (Number.isFinite(idx) && targetList[idx]) {
+			const c = itemColors[targetList[idx].id ?? targetList[idx].key];
+			if (isValidHexColor(c)) return c;
+		}
+		return null;
+	}
+	if (chartType === "beeswarm" && /^b(\d+)$/.test(key)) {
+		const rowIdx = Number(key.slice(1));
+		const groupCol = typeof encoding?.group === "string" ? encoding.group : "group";
+		const labelCol = typeof encoding?.label === "string" ? encoding.label : "label";
+		const row = rows[rowIdx];
+		if (row) {
+			const gVal = String(row[groupCol] ?? "");
+			const lVal = String(row[labelCol] ?? "");
+			if (gVal && isValidHexColor(itemColors[gVal])) return itemColors[gVal];
+			if (lVal && isValidHexColor(itemColors[lVal])) return itemColors[lVal];
+		}
+		return null;
+	}
+	if (/^\d+$/.test(key)) {
+		const idx = Number(key);
+		if (chartType === "funnel" && isMark || chartType === "donut" && !isMark || chartType === "chord" && !isMark || chartType === "skyline" && !isMark) {
+			const target = targetList[idx];
+			const targetKey = target?.id ?? target?.key;
+			if (targetKey && isValidHexColor(itemColors[targetKey])) return itemColors[targetKey];
+		}
+	}
+	return null;
+}
+/**
 * Resolves canonical aspect props into a validated `ztd-charts` ChartSpec and metadata.
 */
 function resolveChartSpec(rawProps = {}) {
@@ -23039,13 +23501,17 @@ function resolveChartSpec(rawProps = {}) {
 		"true",
 		"false"
 	].includes(rawProps.legendMode) ? rawProps.legendMode : "auto";
-	const accentColor = typeof rawProps.accentColor === "string" && /^#[0-9a-f]{6}$/i.test(rawProps.accentColor) ? rawProps.accentColor : CHART_DEFAULTS.accentColor;
+	const accentColor = isValidHexColor(rawProps.accentColor) ? rawProps.accentColor.trim() : CHART_DEFAULTS.accentColor;
 	const def = getLocalizedChartDef(chartType, lang);
 	const example = def.example;
 	const customRows = cloneJsonRows(rawProps.data);
 	const customEncoding = isPlainRecord$1(rawProps.encoding) ? { ...rawProps.encoding } : {};
 	const customOptions = isPlainRecord$1(rawProps.options) ? { ...rawProps.options } : {};
 	const textOverrides = isPlainRecord$1(customOptions.textOverrides) ? { ...customOptions.textOverrides } : {};
+	const itemColors = sanitizeItemColors(customOptions.itemColors);
+	const backgroundColor = isValidHexColor(rawProps.backgroundColor) ? rawProps.backgroundColor.trim() : isValidHexColor(customOptions.backgroundColor) ? customOptions.backgroundColor.trim() : "";
+	const neutralColor = isValidHexColor(customOptions.neutralColor) ? customOptions.neutralColor.trim() : "";
+	const resolvedTheme = resolveChartTheme(themeName, accentColor, backgroundColor, neutralColor);
 	let effectiveRows = example.data;
 	let effectiveEncoding = { ...example.encoding ?? {} };
 	let effectiveOptions = {
@@ -23053,6 +23519,11 @@ function resolveChartSpec(rawProps = {}) {
 		...customOptions,
 		locale: localeTag
 	};
+	if (customOptions.highlight === "auto") delete effectiveOptions.highlight;
+	if (chartType === "candlestick") {
+		if (isValidHexColor(itemColors.up) && !isValidHexColor(effectiveOptions.upColor)) effectiveOptions.upColor = itemColors.up;
+		if (isValidHexColor(itemColors.down) && !isValidHexColor(effectiveOptions.downColor)) effectiveOptions.downColor = itemColors.down;
+	}
 	let usingSampleData = true;
 	if (customRows.length > 0) {
 		const candidateDirect = {
@@ -23081,12 +23552,38 @@ function resolveChartSpec(rawProps = {}) {
 			}
 		}
 	}
+	const dataTargets = extractChartDataTargets(chartType, effectiveRows, effectiveEncoding, effectiveOptions, resolvedTheme, localeTag);
+	const singleTargetCustomColor = (chartType === "gauge" || chartType === "sparkline") && dataTargets[0]?.customColor ? dataTargets[0].customColor : "";
+	const finalTheme = singleTargetCustomColor ? resolveChartTheme(themeName, singleTargetCustomColor, backgroundColor, neutralColor) : resolvedTheme;
 	const title = textOverrides["field:title"] !== void 0 ? String(textOverrides["field:title"]) : typeof rawProps.title === "string" && rawProps.title.length > 0 ? rawProps.title : example.card?.title ?? def.name ?? chartType;
 	const subtitle = textOverrides["field:subtitle"] !== void 0 ? String(textOverrides["field:subtitle"]) : typeof rawProps.subtitle === "string" && rawProps.subtitle.length > 0 ? rawProps.subtitle : example.card?.subtitle ?? "";
 	const takeaway = textOverrides["field:takeaway"] !== void 0 ? String(textOverrides["field:takeaway"]) : typeof rawProps.takeaway === "string" && rawProps.takeaway.length > 0 ? rawProps.takeaway : usingSampleData ? example.card?.takeaway ?? "" : "";
 	const cardNumber = textOverrides["field:cardNumber"] !== void 0 ? String(textOverrides["field:cardNumber"]) : customOptions.cardNumber !== void 0 ? String(customOptions.cardNumber) : example.card?.number !== void 0 ? String(example.card.number) : "";
 	const cardLevel = textOverrides["field:cardLevel"] !== void 0 ? String(textOverrides["field:cardLevel"]) : customOptions.cardLevel !== void 0 ? String(customOptions.cardLevel) : example.card?.level !== void 0 ? String(example.card.level) : "";
-	const cardLegend = legendMode === "false" ? false : "auto";
+	const baseSpecForLegend = {
+		type: chartType,
+		data: effectiveRows,
+		encoding: effectiveEncoding,
+		options: effectiveOptions
+	};
+	let legendItems = [];
+	if (variant === "card" && legendMode !== "false") try {
+		const computed = autoLegend(baseSpecForLegend, effectiveRows, localeTag);
+		if (Array.isArray(computed)) legendItems = computed.map((item, idx) => {
+			const baseLabel = String(item?.label ?? "");
+			const override = textOverrides[`legend:${idx}`] ?? textOverrides[`text:${baseLabel}`];
+			const customColor = itemColors[baseLabel] || (chartType === "candlestick" && idx === 0 ? itemColors.up : "") || (chartType === "candlestick" && idx === 1 ? itemColors.down : "");
+			return {
+				...item,
+				...override !== void 0 ? { label: String(override) } : {},
+				...isValidHexColor(customColor) ? { color: customColor } : {}
+			};
+		});
+	} catch {
+		legendItems = [];
+	}
+	const hasLegendOverrides = legendItems.some((item, idx) => textOverrides[`legend:${idx}`] !== void 0 || textOverrides[`text:${item?.label}`] !== void 0 || isValidHexColor(item?.color));
+	const cardLegend = legendMode === "false" ? false : hasLegendOverrides && legendItems.length > 0 ? legendItems : "auto";
 	const card = variant === "card" ? {
 		...example.card ?? {},
 		number: cardNumber || void 0,
@@ -23104,27 +23601,18 @@ function resolveChartSpec(rawProps = {}) {
 		options: effectiveOptions,
 		...card ? { card } : {}
 	};
-	let legendItems = [];
-	if (variant === "card" && legendMode !== "false") try {
-		const computed = autoLegend(spec, effectiveRows, localeTag);
-		if (Array.isArray(computed)) legendItems = computed.map((item, idx) => {
-			const baseLabel = String(item?.label ?? "");
-			const override = textOverrides[`legend:${idx}`] ?? textOverrides[`text:${baseLabel}`];
-			return override !== void 0 ? {
-				...item,
-				label: String(override)
-			} : item;
-		});
-	} catch {
-		legendItems = [];
-	}
 	return {
 		chartType,
 		lang,
 		localeTag,
 		themeName,
 		accentColor,
-		resolvedTheme: resolveChartTheme(themeName, accentColor),
+		backgroundColor,
+		neutralColor,
+		highlight: customOptions.highlight ?? "auto",
+		itemColors,
+		dataTargets,
+		resolvedTheme: finalTheme,
 		variant,
 		legendMode,
 		title,
@@ -23366,10 +23854,10 @@ function getReactInternals() {
 * Synchronous, zero-CJS static React element serializer tailored for `ztd-charts`.
 * Avoids `react-dom/server` so the ESM bundle never emits CommonJS `require("react")`.
 */
-function renderStaticElement(rootElement, idPrefix = "ztd") {
+function renderStaticElement(rootElement, idPrefix = "ztd", colorContext = null) {
 	const internals = getReactInternals();
 	let idCounter = 0;
-	function renderComponent(Component, props, contextMap) {
+	function renderComponent(Component, props, contextMap, activeColor, inheritedKey) {
 		const dispatcher = {
 			useState: (initial) => [typeof initial === "function" ? initial() : initial, () => {}],
 			useReducer: (_reducer, initArg, init) => [typeof init === "function" ? init(initArg) : initArg, () => {}],
@@ -23392,53 +23880,71 @@ function renderStaticElement(rootElement, idPrefix = "ztd") {
 		if (usesModernField) internals.H = dispatcher;
 		else if (internals) internals.current = dispatcher;
 		try {
-			return walk(Component(props), contextMap);
+			return walk(Component(props), contextMap, activeColor, inheritedKey);
 		} finally {
 			if (usesModernField) internals.H = previous;
 			else if (internals) internals.current = previous;
 		}
 	}
-	function walk(node, contextMap) {
+	function walk(node, contextMap, activeColor = null, inheritedKey = "") {
 		if (node === null || node === void 0 || typeof node === "boolean") return "";
 		if (typeof node === "string" || typeof node === "number") return escapeXml(node);
 		if (Array.isArray(node)) {
 			let out = "";
-			for (const child of node) out += walk(child, contextMap);
+			for (const child of node) out += walk(child, contextMap, activeColor, "");
 			return out;
 		}
 		if (typeof node === "object" && node.$$typeof) {
-			const { type, props } = node;
-			if (type === React.Fragment) return walk(props?.children, contextMap);
+			const { type, props, key } = node;
+			const ownKey = key !== null && key !== void 0 ? String(key) : inheritedKey;
+			if (type === React.Fragment) return walk(props?.children, contextMap, activeColor, ownKey);
 			if (typeof type === "object" && type !== null) {
 				if ("value" in (props ?? {}) && ("_context" in type || "_currentValue" in type || "Provider" in type)) {
 					const ctx = type._context ?? type;
 					const nextMap = new Map(contextMap);
 					nextMap.set(ctx, props.value);
-					return walk(props.children, nextMap);
+					return walk(props.children, nextMap, activeColor, ownKey);
 				}
-				if (typeof type.render === "function") return renderComponent((p) => type.render(p, null), props, contextMap);
-				if (typeof type.type === "function") return renderComponent(type.type, props, contextMap);
+				if (typeof type.render === "function") return renderComponent((p) => type.render(p, null), props, contextMap, activeColor, ownKey);
+				if (typeof type.type === "function") return renderComponent(type.type, props, contextMap, activeColor, ownKey);
 			}
-			if (typeof type === "function") return renderComponent(type, props ?? {}, contextMap);
+			if (typeof type === "function") return renderComponent(type, props ?? {}, contextMap, activeColor, ownKey);
 			if (typeof type === "string") {
 				const { children, dangerouslySetInnerHTML, style, ...rest } = props ?? {};
+				const isMark = typeof rest.className === "string" && rest.className.includes("ztd-mark");
+				const effectiveColor = (colorContext ? resolveColorForZtdKey(colorContext.chartType, ownKey, rest["data-k"], isMark, colorContext.itemColors, colorContext.dataTargets, colorContext.rows, colorContext.encoding) : null) || activeColor;
+				if (effectiveColor && [
+					"path",
+					"rect",
+					"circle",
+					"line",
+					"polygon"
+				].includes(type)) {
+					const isBulletBgOrTarget = colorContext?.chartType === "bullet" && (type === "line" || type === "path" && ownKey && /^\d+$/.test(ownKey));
+					const isBoxWhisker = colorContext?.chartType === "box" && type === "line";
+					if (!isBulletBgOrTarget && !isBoxWhisker && rest.fill !== "transparent") {
+						if (typeof rest.fill === "string" && rest.fill !== "none" && rest.fill !== "transparent" && !rest.fill.includes("--ztd-panel")) rest.fill = effectiveColor;
+						if (typeof rest.stroke === "string" && rest.stroke !== "none" && !rest.stroke.includes("--ztd-panel") && !rest.stroke.includes("--ztd-line") && !rest.stroke.includes("--ztd-dim") && !rest.stroke.includes("--ztd-neutral-soft")) rest.stroke = effectiveColor;
+					}
+				}
 				let attrString = "";
-				for (const [key, val] of Object.entries(rest)) {
-					if (val === null || val === void 0 || val === false || typeof val === "function" || key === "ref" || key === "key") continue;
-					const attrName = toAttributeName(key);
+				if (ownKey) attrString += ` data-ztd-key="${escapeXml(ownKey)}"`;
+				for (const [propKey, val] of Object.entries(rest)) {
+					if (val === null || val === void 0 || val === false || typeof val === "function" || propKey === "ref" || propKey === "key") continue;
+					const attrName = toAttributeName(propKey);
 					attrString += ` ${attrName}="${escapeXml(val === true ? "" : String(val))}"`;
 				}
 				if (style && typeof style === "object") {
 					const css = serializeStyleObject(style);
 					if (css) attrString += ` style="${escapeXml(css)}"`;
 				}
-				const inner = dangerouslySetInnerHTML?.__html !== void 0 ? String(dangerouslySetInnerHTML.__html) : walk(children, contextMap);
+				const inner = dangerouslySetInnerHTML?.__html !== void 0 ? String(dangerouslySetInnerHTML.__html) : walk(children, contextMap, effectiveColor, "");
 				return `<${type}${attrString}>${inner}</${type}>`;
 			}
 		}
 		return "";
 	}
-	return walk(rootElement, /* @__PURE__ */ new Map());
+	return walk(rootElement, /* @__PURE__ */ new Map(), null, "");
 }
 /**
 * Resolves `var(--ztd-..., fallback)` expressions into concrete color/token values
@@ -23487,6 +23993,13 @@ function applySvgTextOverrides(svgContent, textOverrides) {
 }
 function renderLegendSvg(legendItems, maxWidth, yOffset, resolvedTheme) {
 	if (!Array.isArray(legendItems) || legendItems.length === 0) return "";
+	const tokenColorMap = {
+		accent: resolvedTheme.accent,
+		neutral: resolvedTheme.neutral,
+		neutralStrong: resolvedTheme.neutralStrong,
+		neutralSoft: resolvedTheme.neutralSoft,
+		ink: resolvedTheme.ink
+	};
 	let cursorX = 0;
 	const parts = [];
 	for (let idx = 0; idx < Math.min(legendItems.length, 6); idx++) {
@@ -23495,7 +24008,7 @@ function renderLegendSvg(legendItems, maxWidth, yOffset, resolvedTheme) {
 		if (!label) continue;
 		const itemWidth = Math.ceil(textWidth(label, 11) + 22);
 		if (cursorX > 0 && cursorX + itemWidth > maxWidth) break;
-		const rawColor = item?.color || resolvedTheme.accent;
+		const rawColor = tokenColorMap[item?.color] || item?.color || resolvedTheme.accent;
 		const swatchColor = inlineZtdCssVariables(String(rawColor), resolvedTheme);
 		parts.push(`<g transform="translate(${cursorX},${yOffset})"><rect x="0" y="2" width="9" height="9" rx="2.5" fill="${escapeXml(swatchColor)}"/><text data-chart-text-slot="legend:${idx}" x="14" y="10" font-size="11" font-weight="500" fill="${escapeXml(resolvedTheme.muted)}">${escapeXml(label)}</text></g>`);
 		cursorX += itemWidth;
@@ -23539,7 +24052,13 @@ function renderChartSvg(props, derived, entityId = "chart") {
 		height: plotHeight,
 		animate: false,
 		locale: localeTag
-	})), `ztd-${safeId}`).match(/<svg([^>]*)>([\s\S]*?)<\/svg>/i);
+	})), `ztd-${safeId}`, {
+		chartType: resolved.chartType,
+		itemColors: resolved.itemColors,
+		dataTargets: resolved.dataTargets,
+		rows: bareSpec.data,
+		encoding: bareSpec.encoding
+	}).match(/<svg([^>]*)>([\s\S]*?)<\/svg>/i);
 	const viewBox = (svgMatch?.[1]?.match(/viewBox="([^"]+)"/i))?.[1] ?? `0 0 ${plotWidth} ${plotHeight}`;
 	const innerPlotSvg = svgMatch?.[2] ? applySvgTextOverrides(inlineZtdCssVariables(svgMatch[2], resolvedTheme), textOverrides) : "";
 	const clipId = `ztd-card-clip-${safeId}`;
@@ -23593,11 +24112,81 @@ function ensureDocumentBaseCss(doc) {
 		injectedDocs.add(doc);
 	} catch {}
 }
-function ChartIslandContent({ activeSpec, variant, plotWidth, plotHeight, localeTag, textOverrides, cardNumber, cardLevel, hostEl }) {
+function getElementZtdKey(el) {
+	if (!el || typeof el.getAttribute !== "function") return "";
+	const existing = el.getAttribute("data-ztd-key");
+	if (existing) return existing;
+	const keys = Object.keys(el);
+	for (let i = 0; i < keys.length; i++) {
+		const k = keys[i];
+		if (k.startsWith("__reactFiber$")) {
+			const fiber = el[k];
+			const ownKey = fiber?.key ?? (fiber?.return && typeof fiber.return.type !== "string" ? fiber.return.key : null);
+			if (ownKey !== null && ownKey !== void 0 && ownKey !== "") {
+				const keyStr = String(ownKey);
+				el.setAttribute("data-ztd-key", keyStr);
+				return keyStr;
+			}
+			break;
+		}
+	}
+	return "";
+}
+function applyDomCustomColors(root, resolved) {
+	if (!root || !resolved || typeof root.querySelector !== "function") return;
+	const svgEl = root.querySelector("svg.ztd-svg") ?? root.querySelector("svg");
+	if (!svgEl) return;
+	const itemColors = resolved.itemColors ?? {};
+	const hasCustom = Object.keys(itemColors).length > 0;
+	function walkSvgNode(el, inheritedColor) {
+		if (!el || el.nodeType !== 1) return;
+		const tag = (el.tagName || "").toLowerCase();
+		const ztdKey = getElementZtdKey(el);
+		const dataK = el.getAttribute?.("data-k");
+		const isMark = (el.getAttribute?.("class") || "").includes("ztd-mark");
+		const effectiveColor = (hasCustom ? resolveColorForZtdKey(resolved.chartType, ztdKey, dataK, isMark, itemColors, resolved.dataTargets, resolved.spec?.data, resolved.spec?.encoding) : null) || inheritedColor;
+		if ([
+			"path",
+			"rect",
+			"circle",
+			"line",
+			"polygon"
+		].includes(tag)) {
+			const isBulletBgOrTarget = resolved.chartType === "bullet" && (tag === "line" || tag === "path" && ztdKey && /^\d+$/.test(ztdKey));
+			const isBoxWhisker = resolved.chartType === "box" && tag === "line";
+			const currentFill = el.getAttribute("fill");
+			const currentStroke = el.getAttribute("stroke");
+			if (effectiveColor && !isBulletBgOrTarget && !isBoxWhisker && currentFill !== "transparent") {
+				if (typeof currentFill === "string" && currentFill !== "none" && currentFill !== "transparent" && !currentFill.includes("--ztd-panel")) {
+					if (!el.hasAttribute("data-orig-fill")) el.setAttribute("data-orig-fill", currentFill);
+					if (currentFill !== effectiveColor) el.setAttribute("fill", effectiveColor);
+				}
+				if (typeof currentStroke === "string" && currentStroke !== "none" && !currentStroke.includes("--ztd-panel") && !currentStroke.includes("--ztd-line") && !currentStroke.includes("--ztd-dim") && !currentStroke.includes("--ztd-neutral-soft")) {
+					if (!el.hasAttribute("data-orig-stroke")) el.setAttribute("data-orig-stroke", currentStroke);
+					if (currentStroke !== effectiveColor) el.setAttribute("stroke", effectiveColor);
+				}
+			} else {
+				if (el.hasAttribute("data-orig-fill")) {
+					el.setAttribute("fill", el.getAttribute("data-orig-fill"));
+					el.removeAttribute("data-orig-fill");
+				}
+				if (el.hasAttribute("data-orig-stroke")) {
+					el.setAttribute("stroke", el.getAttribute("data-orig-stroke"));
+					el.removeAttribute("data-orig-stroke");
+				}
+			}
+		}
+		const children = el.children;
+		if (children) for (let i = 0; i < children.length; i++) walkSvgNode(children[i], effectiveColor);
+	}
+	walkSvgNode(svgEl, null);
+}
+function ChartIslandContent({ activeSpec, resolved, variant, plotWidth, plotHeight, localeTag, textOverrides, cardNumber, cardLevel, hostEl }) {
 	const wrapRef = React.useRef(null);
 	React.useLayoutEffect(() => {
 		const root = wrapRef.current;
 		if (!root || typeof root.querySelector !== "function") return;
+		applyDomCustomColors(root, resolved);
 		const headerRows = root.querySelectorAll?.(".ztd-card > header > div") ?? [];
 		const firstHeaderRow = headerRows[0];
 		const titleEl = root.querySelector(".ztd-card > header h1, .ztd-card > header h2, .ztd-card > header h3");
@@ -23664,6 +24253,28 @@ function ChartIslandContent({ activeSpec, variant, plotWidth, plotHeight, locale
 			if (el.style) el.style.opacity = "";
 			delete el.dataset.hiddenByEditor;
 		}
+		if (resolved?.itemColors && Object.keys(resolved.itemColors).length > 0 && typeof MutationObserver === "function") {
+			let applying = false;
+			const observer = new MutationObserver(() => {
+				if (applying) return;
+				applying = true;
+				try {
+					applyDomCustomColors(root, resolved);
+				} finally {
+					applying = false;
+				}
+			});
+			const svgEl = root.querySelector("svg");
+			if (svgEl) {
+				observer.observe(svgEl, {
+					childList: true,
+					subtree: true,
+					attributes: true,
+					attributeFilter: ["fill", "stroke"]
+				});
+				return () => observer.disconnect();
+			}
+		}
 	});
 	return React.createElement("div", {
 		ref: wrapRef,
@@ -23707,6 +24318,7 @@ function renderChartDom(hostEl, props, derived, entityId = "chart") {
 		hostEl.dataset.chartTheme = themeName;
 		hostEl.dataset.chartVariant = variant;
 		hostEl.dataset.chartTitle = title;
+		hostEl.dataset.chartBackground = resolved.backgroundColor || "";
 	}
 	const themeVars = themeToCss(resolvedTheme);
 	if (hostEl.style) hostEl.style.cssText = `${themeVars};width:100%;height:${height}px;box-sizing:border-box;position:relative;overflow:hidden;border-radius:14px;background:${resolvedTheme.panel};border:1px solid ${resolvedTheme.line};color:${resolvedTheme.ink};font-family:${resolvedTheme.fontFamily};user-select:none;`;
@@ -23745,6 +24357,7 @@ function renderChartDom(hostEl, props, derived, entityId = "chart") {
 	const activeSpec = variant === "card" ? spec : bareSpec;
 	const element = React.createElement(ThemeProvider, { theme: resolvedTheme }, React.createElement(ChartIslandContent, {
 		activeSpec,
+		resolved,
 		variant,
 		plotWidth,
 		plotHeight,
@@ -23778,6 +24391,7 @@ var COMMAND_NAMES = Object.freeze([
 	"edit-chart",
 	"set-chart-type",
 	"update-data",
+	"update-style",
 	"reset-sample-data",
 	"apply-top-suggestion",
 	"toggle-theme",
@@ -24958,6 +25572,65 @@ function mountInlineEditor(context) {
 	};
 }
 // src/panel.js
+var COLOR_INSPECTOR_PANEL_ID = `${EXTENSION_ID}.color-inspector`;
+var ACCENT_PRESETS = Object.freeze([
+	"#3182f6",
+	"#10b981",
+	"#f59e0b",
+	"#ef4444",
+	"#8b5cf6",
+	"#ec4899",
+	"#06b6d4"
+]);
+var BG_PRESETS = Object.freeze([
+	{
+		label: "화이트",
+		value: "#ffffff"
+	},
+	{
+		label: "슬레이트",
+		value: "#f8fafc"
+	},
+	{
+		label: "웜아이보리",
+		value: "#fffbeb"
+	},
+	{
+		label: "민트틴트",
+		value: "#f0fdf4"
+	},
+	{
+		label: "블루틴트",
+		value: "#eff6ff"
+	},
+	{
+		label: "다크네이비",
+		value: "#0f172a"
+	},
+	{
+		label: "차콜블랙",
+		value: "#18181b"
+	},
+	{
+		label: "딥인디고",
+		value: "#1e1b4b"
+	}
+]);
+var COMPONENT_PALETTE = Object.freeze([
+	"#3182f6",
+	"#10b981",
+	"#f59e0b",
+	"#8b5cf6",
+	"#ef4444",
+	"#06b6d4",
+	"#ec4899",
+	"#14b8a6",
+	"#f97316",
+	"#6366f1"
+]);
+function ensureHexForPicker(color, fallback = "#3182f6") {
+	return isValidHexColor(color) ? color.trim() : fallback;
+}
 function readSelectedChartEntity(world, selectedIds) {
 	if (!world || !Array.isArray(selectedIds)) return null;
 	for (const id of selectedIds) {
@@ -24968,6 +25641,377 @@ function readSelectedChartEntity(world, selectedIds) {
 		};
 	}
 	return null;
+}
+function ChartColorAndHighlightControls({ selected, resolved, context }) {
+	if (!selected || !resolved) return null;
+	const dispatchStyleUpdate = (patchArgs) => {
+		const payload = {
+			entityId: selected.id,
+			...patchArgs
+		};
+		if (typeof context?.executeCommand === "function") context.executeCommand(`${EXTENSION_ID}:update-style`, payload);
+	};
+	const rawHighlight = resolved.highlight;
+	const presetIds = HIGHLIGHT_PRESETS.map((p) => p.id);
+	const activePreset = rawHighlight === void 0 || rawHighlight === null || rawHighlight === "auto" ? "auto" : typeof rawHighlight === "string" && presetIds.includes(rawHighlight) ? rawHighlight : "custom";
+	const customHighlightSet = new Set(Array.isArray(rawHighlight) ? rawHighlight.map(String) : activePreset === "custom" && rawHighlight !== void 0 && rawHighlight !== null ? [String(rawHighlight)] : []);
+	const dataItems = resolved.dataTargets?.items ?? [];
+	const itemColors = resolved.itemColors ?? {};
+	const hasCustomItemColors = Object.keys(itemColors).length > 0;
+	const handleToggleHighlightItem = (itemKey) => {
+		const next = new Set(customHighlightSet);
+		if (next.has(itemKey)) next.delete(itemKey);
+		else next.add(itemKey);
+		const list = [...next];
+		dispatchStyleUpdate({ highlight: list.length === 0 ? "none" : list.length === 1 ? list[0] : list });
+	};
+	const handleAssignPalette = () => {
+		if (dataItems.length === 0) return;
+		const nextMap = {};
+		dataItems.forEach((item, idx) => {
+			nextMap[item.key] = COMPONENT_PALETTE[idx % COMPONENT_PALETTE.length];
+		});
+		dispatchStyleUpdate({
+			itemColors: nextMap,
+			replaceItemColors: true
+		});
+	};
+	return React.createElement("div", { style: {
+		display: "flex",
+		flexDirection: "column",
+		gap: "10px",
+		padding: "10px",
+		borderRadius: "8px",
+		border: "1px solid var(--alid-border-subtle, #e4e4e7)",
+		background: "var(--alid-bg-surface, #ffffff)"
+	} }, React.createElement("div", { style: {
+		display: "flex",
+		flexDirection: "column",
+		gap: "6px"
+	} }, React.createElement("div", { style: {
+		display: "flex",
+		alignItems: "center",
+		justifyContent: "space-between"
+	} }, React.createElement("span", { style: {
+		fontWeight: 600,
+		fontSize: "11.5px"
+	} }, "배경 색상 (Background)"), React.createElement("div", { style: {
+		display: "flex",
+		alignItems: "center",
+		gap: "6px"
+	} }, React.createElement("input", {
+		type: "color",
+		ariaLabel: "배경 색상 선택",
+		value: ensureHexForPicker(resolved.backgroundColor, resolved.resolvedTheme?.panel || "#ffffff"),
+		onChange: (e) => dispatchStyleUpdate({ backgroundColor: e.target.value }),
+		style: {
+			width: "24px",
+			height: "22px",
+			padding: 0,
+			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
+			borderRadius: "4px",
+			background: "transparent",
+			cursor: "pointer"
+		}
+	}), resolved.backgroundColor && React.createElement("button", {
+		type: "button",
+		onClick: () => dispatchStyleUpdate({ backgroundColor: "" }),
+		style: {
+			padding: "2px 6px",
+			borderRadius: "4px",
+			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
+			background: "transparent",
+			color: "inherit",
+			fontSize: "10px",
+			cursor: "pointer"
+		}
+	}, "기본값"))), React.createElement("div", { style: {
+		display: "flex",
+		flexWrap: "wrap",
+		gap: "4px"
+	} }, ...BG_PRESETS.map((preset) => React.createElement("button", {
+		key: preset.value,
+		type: "button",
+		title: `${preset.label} (${preset.value})`,
+		onClick: () => dispatchStyleUpdate({ backgroundColor: preset.value }),
+		style: {
+			width: "20px",
+			height: "20px",
+			borderRadius: "5px",
+			border: resolved.backgroundColor?.toLowerCase() === preset.value.toLowerCase() ? "2px solid #3182f6" : "1px solid var(--alid-border-subtle, #d4d4d8)",
+			background: preset.value,
+			cursor: "pointer",
+			padding: 0
+		}
+	})))), React.createElement("div", { style: {
+		display: "flex",
+		flexDirection: "column",
+		gap: "6px",
+		paddingTop: "8px",
+		borderTop: "1px solid var(--alid-border-subtle, #e4e4e7)"
+	} }, React.createElement("div", { style: {
+		display: "flex",
+		alignItems: "center",
+		justifyContent: "space-between",
+		gap: "8px"
+	} }, React.createElement("div", { style: {
+		display: "flex",
+		alignItems: "center",
+		gap: "6px"
+	} }, React.createElement("input", {
+		type: "color",
+		ariaLabel: "강조 색상 선택",
+		value: ensureHexForPicker(resolved.accentColor, "#3182f6"),
+		onChange: (e) => dispatchStyleUpdate({ accentColor: e.target.value }),
+		style: {
+			width: "22px",
+			height: "20px",
+			padding: 0,
+			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
+			borderRadius: "4px",
+			background: "transparent",
+			cursor: "pointer"
+		}
+	}), React.createElement("span", { style: {
+		fontSize: "11px",
+		fontWeight: 600
+	} }, "강조색")), React.createElement("div", { style: {
+		display: "flex",
+		alignItems: "center",
+		gap: "6px"
+	} }, React.createElement("input", {
+		type: "color",
+		ariaLabel: "비강조 기본 데이터 색상 선택",
+		value: ensureHexForPicker(resolved.neutralColor, resolved.resolvedTheme?.neutral || "#cbd5e1"),
+		onChange: (e) => dispatchStyleUpdate({ neutralColor: e.target.value }),
+		style: {
+			width: "22px",
+			height: "20px",
+			padding: 0,
+			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
+			borderRadius: "4px",
+			background: "transparent",
+			cursor: "pointer"
+		}
+	}), React.createElement("span", { style: {
+		fontSize: "11px",
+		fontWeight: 600
+	} }, "기본 데이터색"), resolved.neutralColor && React.createElement("button", {
+		type: "button",
+		onClick: () => dispatchStyleUpdate({ neutralColor: "" }),
+		style: {
+			padding: "1px 5px",
+			borderRadius: "4px",
+			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
+			background: "transparent",
+			color: "inherit",
+			fontSize: "10px",
+			cursor: "pointer"
+		}
+	}, "초기화"))), React.createElement("div", { style: {
+		display: "flex",
+		flexWrap: "wrap",
+		gap: "4px"
+	} }, ...ACCENT_PRESETS.map((hex) => React.createElement("button", {
+		key: hex,
+		type: "button",
+		title: `강조색 ${hex}`,
+		onClick: () => dispatchStyleUpdate({ accentColor: hex }),
+		style: {
+			width: "18px",
+			height: "18px",
+			borderRadius: "999px",
+			border: resolved.accentColor?.toLowerCase() === hex.toLowerCase() ? "2px solid var(--alid-text, #18181b)" : "1px solid rgba(0,0,0,0.15)",
+			background: hex,
+			cursor: "pointer",
+			padding: 0
+		}
+	})))), React.createElement("div", { style: {
+		display: "flex",
+		flexDirection: "column",
+		gap: "6px",
+		paddingTop: "8px",
+		borderTop: "1px solid var(--alid-border-subtle, #e4e4e7)"
+	} }, React.createElement("div", { style: {
+		display: "flex",
+		alignItems: "center",
+		justifyContent: "space-between"
+	} }, React.createElement("span", { style: {
+		fontWeight: 600,
+		fontSize: "11.5px"
+	} }, "강조 데이터 지정 (Highlight)"), activePreset === "custom" && React.createElement("button", {
+		type: "button",
+		onClick: () => dispatchStyleUpdate({ highlight: "auto" }),
+		style: {
+			padding: "1px 6px",
+			borderRadius: "4px",
+			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
+			background: "transparent",
+			color: "inherit",
+			fontSize: "10px",
+			cursor: "pointer"
+		}
+	}, "자동으로")), React.createElement("div", { style: {
+		display: "flex",
+		flexWrap: "wrap",
+		gap: "4px"
+	} }, ...HIGHLIGHT_PRESETS.map((preset) => {
+		const isSelected = activePreset === preset.id;
+		return React.createElement("button", {
+			key: preset.id,
+			type: "button",
+			onClick: () => dispatchStyleUpdate({ highlight: preset.id }),
+			style: {
+				padding: "3px 7px",
+				borderRadius: "5px",
+				border: "1px solid var(--alid-border-subtle, #d4d4d8)",
+				background: isSelected ? "#3182f6" : "transparent",
+				color: isSelected ? "#ffffff" : "inherit",
+				fontSize: "10.5px",
+				fontWeight: isSelected ? 600 : 400,
+				cursor: "pointer"
+			}
+		}, preset.labelKo);
+	})), dataItems.length > 0 && resolved.dataTargets?.kind !== "updown" && React.createElement("div", { style: {
+		display: "flex",
+		flexDirection: "column",
+		gap: "4px",
+		marginTop: "2px"
+	} }, React.createElement("span", { style: {
+		fontSize: "10.5px",
+		color: "var(--alid-text-muted, #71717a)"
+	} }, "클릭하여 특정 데이터 항목만 직접 강조:"), React.createElement("div", { style: {
+		display: "flex",
+		flexWrap: "wrap",
+		gap: "4px"
+	} }, ...dataItems.map((item) => {
+		const isChipActive = customHighlightSet.has(item.key);
+		return React.createElement("button", {
+			key: item.key,
+			type: "button",
+			onClick: () => handleToggleHighlightItem(item.key),
+			style: {
+				padding: "2px 7px",
+				borderRadius: "999px",
+				border: isChipActive ? `1.5px solid ${resolved.accentColor || "#3182f6"}` : "1px solid var(--alid-border-subtle, #d4d4d8)",
+				background: isChipActive ? "rgba(49, 130, 246, 0.14)" : "transparent",
+				color: "inherit",
+				fontSize: "10.5px",
+				fontWeight: isChipActive ? 600 : 400,
+				cursor: "pointer"
+			}
+		}, item.label);
+	})))), dataItems.length > 0 && React.createElement("div", { style: {
+		display: "flex",
+		flexDirection: "column",
+		gap: "6px",
+		paddingTop: "8px",
+		borderTop: "1px solid var(--alid-border-subtle, #e4e4e7)"
+	} }, React.createElement("div", { style: {
+		display: "flex",
+		alignItems: "center",
+		justifyContent: "space-between",
+		gap: "4px"
+	} }, React.createElement("span", { style: {
+		fontWeight: 600,
+		fontSize: "11.5px"
+	} }, "세부 데이터 컴포넌트 색상"), React.createElement("div", { style: {
+		display: "flex",
+		gap: "4px"
+	} }, React.createElement("button", {
+		type: "button",
+		onClick: handleAssignPalette,
+		style: {
+			padding: "2px 6px",
+			borderRadius: "4px",
+			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
+			background: "transparent",
+			color: "inherit",
+			fontSize: "10px",
+			cursor: "pointer"
+		}
+	}, "팔레트 자동 배정"), hasCustomItemColors && React.createElement("button", {
+		type: "button",
+		onClick: () => dispatchStyleUpdate({
+			itemColors: {},
+			replaceItemColors: true
+		}),
+		style: {
+			padding: "2px 6px",
+			borderRadius: "4px",
+			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
+			background: "transparent",
+			color: "inherit",
+			fontSize: "10px",
+			cursor: "pointer"
+		}
+	}, "초기화"))), React.createElement("div", { style: {
+		display: "grid",
+		gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+		gap: "5px",
+		maxHeight: "160px",
+		overflowY: "auto",
+		paddingRight: "2px"
+	} }, ...dataItems.map((item, idx) => {
+		const customHex = itemColors[item.key];
+		const pickerValue = ensureHexForPicker(customHex, item.key === "up" ? resolved.resolvedTheme?.accent || "#3182f6" : item.key === "down" ? resolved.resolvedTheme?.neutralStrong || "#64748b" : customHighlightSet.has(item.key) ? resolved.resolvedTheme?.accent || "#3182f6" : COMPONENT_PALETTE[idx % COMPONENT_PALETTE.length]);
+		return React.createElement("div", {
+			key: item.key,
+			style: {
+				display: "flex",
+				alignItems: "center",
+				justifyContent: "space-between",
+				gap: "4px",
+				padding: "3px 6px",
+				borderRadius: "6px",
+				border: customHex ? `1px solid ${customHex}` : "1px solid var(--alid-border-subtle, #e4e4e7)",
+				background: customHex ? "rgba(49, 130, 246, 0.04)" : "transparent"
+			}
+		}, React.createElement("label", { style: {
+			display: "flex",
+			alignItems: "center",
+			gap: "5px",
+			minWidth: 0,
+			flex: 1,
+			cursor: "pointer"
+		} }, React.createElement("input", {
+			type: "color",
+			value: pickerValue,
+			onChange: (e) => dispatchStyleUpdate({ itemColors: { [item.key]: e.target.value } }),
+			style: {
+				width: "18px",
+				height: "18px",
+				padding: 0,
+				border: "none",
+				borderRadius: "4px",
+				background: "transparent",
+				cursor: "pointer",
+				flexShrink: 0
+			}
+		}), React.createElement("span", {
+			title: item.label,
+			style: {
+				fontSize: "11px",
+				fontWeight: customHex ? 600 : 400,
+				overflow: "hidden",
+				textOverflow: "ellipsis",
+				whiteSpace: "nowrap"
+			}
+		}, item.label)), customHex && React.createElement("button", {
+			type: "button",
+			title: "개별 색상 해제",
+			onClick: () => dispatchStyleUpdate({ itemColors: { [item.key]: "" } }),
+			style: {
+				border: "none",
+				background: "transparent",
+				color: "var(--alid-text-muted, #71717a)",
+				fontSize: "11px",
+				cursor: "pointer",
+				padding: "0 2px",
+				lineHeight: 1
+			}
+		}, "×"));
+	}))));
 }
 function ZtdChartStudioView({ context }) {
 	const [tick, setTick] = useState(0);
@@ -25170,7 +26214,11 @@ function ZtdChartStudioView({ context }) {
 			textOverflow: "ellipsis",
 			whiteSpace: "nowrap"
 		} }, item.type));
-	})), selected && resolved ? React.createElement(React.Fragment, null, recommendations.length > 0 && React.createElement("div", { style: {
+	})), selected && resolved ? React.createElement(React.Fragment, null, React.createElement(ChartColorAndHighlightControls, {
+		selected,
+		resolved,
+		context
+	}), recommendations.length > 0 && React.createElement("div", { style: {
 		display: "flex",
 		flexDirection: "column",
 		gap: "6px",
@@ -25296,6 +26344,56 @@ function ZtdChartStudioView({ context }) {
 		}
 	}, "샘플 복원")))) : null);
 }
+function ZtdChartColorInspectorView({ context }) {
+	const [tick, setTick] = useState(0);
+	useEffect(() => {
+		if (!context) return void 0;
+		const bump = () => setTick((v) => v + 1);
+		const offSel = context.onSelectionChange?.(bump);
+		const offWorld = context.onWorldMutated?.(bump);
+		return () => {
+			offSel?.();
+			offWorld?.();
+		};
+	}, [context]);
+	const selected = useMemo(() => {
+		const ids = context?.getSelectedIds?.() ?? [];
+		return readSelectedChartEntity(context?.world, ids);
+	}, [context, tick]);
+	const resolved = useMemo(() => selected ? resolveChartSpec(selected.props) : null, [selected]);
+	if (!selected || !resolved) return null;
+	return React.createElement(ChartColorAndHighlightControls, {
+		selected,
+		resolved,
+		context
+	});
+}
+function createColorInspectorPanelSpec() {
+	return {
+		panelId: COLOR_INSPECTOR_PANEL_ID,
+		title: "강조 데이터 및 세부 색상",
+		defaultZone: "right",
+		inspectorFor: CHART_ASPECT_ID,
+		isolation: "container",
+		mount(hostEl, context) {
+			if (!hostEl) return () => {};
+			const doc = hostEl.ownerDocument;
+			if (!doc || typeof doc.createElement !== "function") {
+				hostEl.textContent = "강조 데이터 및 세부 색상";
+				return () => {
+					hostEl.textContent = "";
+				};
+			}
+			const root = createRoot(hostEl);
+			root.render(React.createElement(ZtdChartColorInspectorView, { context }));
+			return () => {
+				try {
+					root.unmount();
+				} catch {}
+			};
+		}
+	};
+}
 function createStudioPanelSpec() {
 	return {
 		panelId: STUDIO_PANEL_ID,
@@ -25375,8 +26473,13 @@ function sanitizePatch(rawPatch, existingProps = CHART_DEFAULTS) {
 		clean.legendMode = rawPatch.legendMode;
 	}
 	if (rawPatch.accentColor !== void 0) {
-		if (typeof rawPatch.accentColor !== "string" || !/^#[0-9a-f]{6}$/i.test(rawPatch.accentColor)) throw new Error("INVALID_INPUT: accentColor must be a #rrggbb hex string");
-		clean.accentColor = rawPatch.accentColor;
+		if (!isValidHexColor(rawPatch.accentColor)) throw new Error("INVALID_INPUT: accentColor must be a #rrggbb hex string");
+		clean.accentColor = rawPatch.accentColor.trim();
+	}
+	if (rawPatch.backgroundColor !== void 0) {
+		if (rawPatch.backgroundColor === "") clean.backgroundColor = "";
+		else if (!isValidHexColor(rawPatch.backgroundColor)) throw new Error("INVALID_INPUT: backgroundColor must be \"\" or a #rrggbb hex string");
+		else clean.backgroundColor = rawPatch.backgroundColor.trim();
 	}
 	if (rawPatch.data !== void 0) {
 		if (typeof rawPatch.data === "string") {
@@ -25394,7 +26497,29 @@ function sanitizePatch(rawPatch, existingProps = CHART_DEFAULTS) {
 	}
 	if (rawPatch.options !== void 0) {
 		if (!isPlainObject(rawPatch.options)) throw new Error("INVALID_INPUT: options must be an object");
-		clean.options = { ...rawPatch.options };
+		clean.options = {
+			...existingProps.options ?? {},
+			...rawPatch.options
+		};
+		if (clean.options.itemColors !== void 0) clean.options.itemColors = sanitizeItemColors(clean.options.itemColors);
+	}
+	if (rawPatch.highlight !== void 0) clean.options = {
+		...clean.options ?? existingProps.options ?? {},
+		highlight: rawPatch.highlight
+	};
+	if (rawPatch.neutralColor !== void 0) {
+		if (rawPatch.neutralColor !== "" && !isValidHexColor(rawPatch.neutralColor)) throw new Error("INVALID_INPUT: neutralColor must be \"\" or a #rrggbb hex string");
+		const nextOpts = { ...clean.options ?? existingProps.options ?? {} };
+		if (rawPatch.neutralColor === "") delete nextOpts.neutralColor;
+		else nextOpts.neutralColor = rawPatch.neutralColor.trim();
+		clean.options = nextOpts;
+	}
+	if (rawPatch.itemColors !== void 0) {
+		if (!isPlainObject(rawPatch.itemColors)) throw new Error("INVALID_INPUT: itemColors must be an object mapping data labels/keys to #rrggbb hex colors");
+		clean.options = {
+			...clean.options ?? existingProps.options ?? {},
+			itemColors: sanitizeItemColors(rawPatch.itemColors)
+		};
 	}
 	return clean;
 }
@@ -25566,9 +26691,10 @@ function registerZtdChartTools(context) {
 				variant: `Allowed: ${ALLOWED_VARIANTS.join(", ")}`,
 				legendMode: `Allowed: ${ALLOWED_LEGENDS.join(", ")}`,
 				accentColor: "string (#rrggbb): 강조 계열 색상",
+				backgroundColor: "string (#rrggbb or \"\"): 차트 카드 배경 색상",
 				data: "array of row objects (비워 두면 해당 차트 유형의 내장 샘플 데이터 사용)",
 				encoding: "object: 데이터 컬럼 매핑 (예: { x, y, series } 또는 { label, value })",
-				options: "object: 차트별 세부 옵션 (layout, orientation, curve, area 등)"
+				options: "object: 차트별 세부 옵션 (highlight: \"auto\"|\"max\"|\"min\"|\"first\"|\"last\"|\"none\"|string|string[], neutralColor: \"#rrggbb\", itemColors: { [label]: \"#rrggbb\" } 등)"
 			}
 		}));
 		registerTool("catalog", "ZTD 차트 36종 카탈로그 및 용도·권장 인코딩 조회 (읽기 전용).", {
@@ -25681,6 +26807,7 @@ var COMMAND_LABELS = Object.freeze({
 	"edit-chart": "차트 텍스트 인라인 편집",
 	"set-chart-type": "차트 종류 변경",
 	"update-data": "차트 데이터 업데이트",
+	"update-style": "차트 색상·배경·강조 데이터 변경",
 	"reset-sample-data": "샘플 데이터 복원",
 	"apply-top-suggestion": "데이터 맞춤 추천 차트 적용",
 	"toggle-theme": "차트 라이트/다크 테마 전환",
@@ -25851,6 +26978,14 @@ var ztdChartAspect = Object.freeze({
 				placement: "inspector"
 			},
 			{
+				id: "ztd-charts.background.inspector",
+				kind: "color",
+				field: "backgroundColor",
+				label: "배경 색상",
+				section: "스타일 및 표시",
+				placement: "inspector"
+			},
+			{
 				id: "ztd-charts.suggest.inspector",
 				kind: "action",
 				label: "데이터 맞춤 추천 차트 적용",
@@ -25870,7 +27005,7 @@ var ztdChartAspect = Object.freeze({
 				requiresSelection: true
 			}
 		],
-		panels: [createStudioPanelSpec()]
+		panels: [createColorInspectorPanelSpec(), createStudioPanelSpec()]
 	}
 });
 function getActiveSurface(context) {
@@ -25938,15 +27073,25 @@ var plugin = {
 			const y = hasExplicitY ? args.y : 80 + existingCount % 4 * 36;
 			const width = Number.isFinite(args.width) && args.width > 0 ? Math.round(args.width) : 480;
 			const height = Number.isFinite(args.height) && args.height > 0 ? Math.round(args.height) : 340;
+			const sampleProps = createSamplePropsForType(chartType, locale, theme);
+			const initialOptions = {
+				...sampleProps.options ?? {},
+				...args.options && typeof args.options === "object" ? args.options : {},
+				...args.highlight !== void 0 ? { highlight: args.highlight } : {},
+				...isValidHexColor(args.neutralColor) ? { neutralColor: args.neutralColor.trim() } : {},
+				...args.itemColors && typeof args.itemColors === "object" ? { itemColors: sanitizeItemColors(args.itemColors) } : {}
+			};
 			const chartProps = {
-				...createSamplePropsForType(chartType, locale, theme),
+				...sampleProps,
 				variant,
 				...typeof args.title === "string" ? { title: args.title } : {},
 				...typeof args.subtitle === "string" ? { subtitle: args.subtitle } : {},
 				...typeof args.takeaway === "string" ? { takeaway: args.takeaway } : {},
+				...isValidHexColor(args.accentColor) ? { accentColor: args.accentColor.trim() } : {},
+				...isValidHexColor(args.backgroundColor) ? { backgroundColor: args.backgroundColor.trim() } : {},
 				...Array.isArray(args.data) ? { data: args.data } : {},
 				...args.encoding && typeof args.encoding === "object" ? { encoding: args.encoding } : {},
-				...args.options && typeof args.options === "object" ? { options: args.options } : {}
+				...Object.keys(initialOptions).length > 0 ? { options: initialOptions } : {}
 			};
 			const creation = context?.services?.get?.("canvas.creation");
 			if (creation && typeof creation.create === "function") return creation.create({
@@ -26051,6 +27196,62 @@ var plugin = {
 			});
 			return targetIds;
 		};
+		const updateStyle = (rawArgs = {}) => {
+			const args = rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs) ? rawArgs : {};
+			const targetIds = getSelectedChartIds(context, args.entityId);
+			if (targetIds.length === 0) return null;
+			const ops = [];
+			for (const id of targetIds) {
+				const current = context.world.getCanonical(id, CHART_ASPECT_ID);
+				if (!current) continue;
+				const nextOptions = { ...current.options ?? {} };
+				let optionsChanged = false;
+				if (args.options && typeof args.options === "object" && !Array.isArray(args.options)) {
+					for (const [k, v] of Object.entries(args.options)) if (v === void 0 || v === null) delete nextOptions[k];
+					else nextOptions[k] = v;
+					optionsChanged = true;
+				}
+				if ("highlight" in args) {
+					if (args.highlight === void 0 || args.highlight === null || args.highlight === "auto") delete nextOptions.highlight;
+					else nextOptions.highlight = args.highlight;
+					optionsChanged = true;
+				}
+				if ("neutralColor" in args) {
+					if (!args.neutralColor) delete nextOptions.neutralColor;
+					else if (isValidHexColor(args.neutralColor)) nextOptions.neutralColor = args.neutralColor.trim();
+					optionsChanged = true;
+				}
+				if ("itemColors" in args) {
+					if (!args.itemColors || typeof args.itemColors === "object" && Object.keys(args.itemColors).length === 0 && args.replaceItemColors) delete nextOptions.itemColors;
+					else if (typeof args.itemColors === "object" && !Array.isArray(args.itemColors)) {
+						const mergedColors = args.replaceItemColors ? {} : { ...nextOptions.itemColors ?? {} };
+						for (const [k, v] of Object.entries(args.itemColors)) {
+							const keyStr = String(k ?? "").trim();
+							if (!keyStr) continue;
+							if (!v) delete mergedColors[keyStr];
+							else if (isValidHexColor(v)) mergedColors[keyStr] = v.trim();
+						}
+						if (Object.keys(mergedColors).length > 0) nextOptions.itemColors = mergedColors;
+						else delete nextOptions.itemColors;
+					}
+					optionsChanged = true;
+				}
+				const patch = {};
+				if (typeof args.theme === "string" && (args.theme === "light" || args.theme === "dark")) patch.theme = args.theme;
+				if ("accentColor" in args && isValidHexColor(args.accentColor)) patch.accentColor = args.accentColor.trim();
+				if ("backgroundColor" in args) patch.backgroundColor = isValidHexColor(args.backgroundColor) ? args.backgroundColor.trim() : "";
+				if (optionsChanged) patch.options = nextOptions;
+				if (Object.keys(patch).length > 0) ops.push({
+					id,
+					aspect: CHART_ASPECT_ID,
+					patch
+				});
+			}
+			if (ops.length > 0) withHistoryGroup(context, () => {
+				context.world.applyCanonicalTransaction(`${EXTENSION_ID}:update-style`, ops);
+			});
+			return targetIds;
+		};
 		const resetSampleData = (rawArgs = {}) => {
 			const targetIds = getSelectedChartIds(context, (rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs) ? rawArgs : {}).entityId);
 			if (targetIds.length === 0) return null;
@@ -26129,6 +27330,7 @@ var plugin = {
 				case "edit-chart": return editChart(args);
 				case "set-chart-type": return setChartType(args);
 				case "update-data": return updateData(args);
+				case "update-style": return updateStyle(args);
 				case "reset-sample-data": return resetSampleData(args);
 				case "apply-top-suggestion": return applyTopSuggestion(args);
 				case "toggle-theme": return toggleField("theme", ["light", "dark"], args);
@@ -26171,6 +27373,7 @@ var plugin = {
 				editChart,
 				setChartType,
 				updateData,
+				updateStyle,
 				resetSampleData,
 				applyTopSuggestion,
 				editor
@@ -26183,4 +27386,4 @@ var plugin = {
 		};
 	}
 };
-export { CHART_ASPECT_ID, CHART_DEFAULTS, CHART_FAMILIES, CHART_TYPES, COMMAND_NAMES, EXTENSION_ID, STUDIO_PANEL_ID, createPackageManifest, createSamplePropsForType, plugin as default, deriveChartGeometry, formatRowsAsCsv, getChartCatalog, matchTextToChartData, mergeDraft, mountInlineEditor, parseDataInput, planZtdChartChanges, registerZtdChartTools, renderChartDom, renderChartSvg, resolveChartSpec, settingsSchema, suggestChartsForRows, ztdChartAspect };
+export { CHART_ASPECT_ID, CHART_DEFAULTS, CHART_FAMILIES, CHART_TYPES, COLOR_INSPECTOR_PANEL_ID, COMMAND_NAMES, EXTENSION_ID, HIGHLIGHT_PRESETS, STUDIO_PANEL_ID, createPackageManifest, createSamplePropsForType, plugin as default, deriveChartGeometry, extractChartDataTargets, formatRowsAsCsv, getChartCatalog, matchTextToChartData, mergeDraft, mountInlineEditor, parseDataInput, planZtdChartChanges, registerZtdChartTools, renderChartDom, renderChartSvg, resolveChartSpec, resolveColorForZtdKey, sanitizeItemColors, settingsSchema, suggestChartsForRows, ztdChartAspect };

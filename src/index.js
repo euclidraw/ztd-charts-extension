@@ -15,18 +15,27 @@ import {
   CHART_TYPES,
   DEFAULT_CHART_HEIGHT,
   DEFAULT_CHART_WIDTH,
+  HIGHLIGHT_PRESETS,
   QUICK_CHART_OPTIONS,
   createSamplePropsForType,
   deriveChartGeometry,
+  extractChartDataTargets,
   formatRowsAsCsv,
   getChartCatalog,
+  isValidHexColor,
   normalizeChartType,
   normalizeLang,
   parseDataInput,
   resolveChartSpec,
+  resolveColorForZtdKey,
+  sanitizeItemColors,
   suggestChartsForRows,
 } from './model.js';
-import { createStudioPanelSpec } from './panel.js';
+import {
+  COLOR_INSPECTOR_PANEL_ID,
+  createColorInspectorPanelSpec,
+  createStudioPanelSpec,
+} from './panel.js';
 import { renderChartSvg } from './svg-renderer.js';
 import { planZtdChartChanges, registerZtdChartTools } from './tools.js';
 
@@ -44,6 +53,7 @@ const COMMAND_LABELS = Object.freeze({
   'edit-chart': '차트 텍스트 인라인 편집',
   'set-chart-type': '차트 종류 변경',
   'update-data': '차트 데이터 업데이트',
+  'update-style': '차트 색상·배경·강조 데이터 변경',
   'reset-sample-data': '샘플 데이터 복원',
   'apply-top-suggestion': '데이터 맞춤 추천 차트 적용',
   'toggle-theme': '차트 라이트/다크 테마 전환',
@@ -192,6 +202,14 @@ export const ztdChartAspect = Object.freeze({
         placement: 'inspector',
       },
       {
+        id: 'ztd-charts.background.inspector',
+        kind: 'color',
+        field: 'backgroundColor',
+        label: '배경 색상',
+        section: '스타일 및 표시',
+        placement: 'inspector',
+      },
+      {
         id: 'ztd-charts.suggest.inspector',
         kind: 'action',
         label: '데이터 맞춤 추천 차트 적용',
@@ -211,7 +229,7 @@ export const ztdChartAspect = Object.freeze({
         requiresSelection: true,
       },
     ],
-    panels: [createStudioPanelSpec()],
+    panels: [createColorInspectorPanelSpec(), createStudioPanelSpec()],
   },
 });
 
@@ -297,15 +315,24 @@ const plugin = {
       const height = Number.isFinite(args.height) && args.height > 0 ? Math.round(args.height) : DEFAULT_CHART_HEIGHT;
 
       const sampleProps = createSamplePropsForType(chartType, locale, theme);
+      const initialOptions = {
+        ...(sampleProps.options ?? {}),
+        ...(args.options && typeof args.options === 'object' ? args.options : {}),
+        ...(args.highlight !== undefined ? { highlight: args.highlight } : {}),
+        ...(isValidHexColor(args.neutralColor) ? { neutralColor: args.neutralColor.trim() } : {}),
+        ...(args.itemColors && typeof args.itemColors === 'object' ? { itemColors: sanitizeItemColors(args.itemColors) } : {}),
+      };
       const chartProps = {
         ...sampleProps,
         variant,
         ...(typeof args.title === 'string' ? { title: args.title } : {}),
         ...(typeof args.subtitle === 'string' ? { subtitle: args.subtitle } : {}),
         ...(typeof args.takeaway === 'string' ? { takeaway: args.takeaway } : {}),
+        ...(isValidHexColor(args.accentColor) ? { accentColor: args.accentColor.trim() } : {}),
+        ...(isValidHexColor(args.backgroundColor) ? { backgroundColor: args.backgroundColor.trim() } : {}),
         ...(Array.isArray(args.data) ? { data: args.data } : {}),
         ...(args.encoding && typeof args.encoding === 'object' ? { encoding: args.encoding } : {}),
-        ...(args.options && typeof args.options === 'object' ? { options: args.options } : {}),
+        ...(Object.keys(initialOptions).length > 0 ? { options: initialOptions } : {}),
       };
 
       const creation = context?.services?.get?.('canvas.creation');
@@ -396,6 +423,97 @@ const plugin = {
       if (ops.length > 0) {
         withHistoryGroup(context, () => {
           context.world.applyCanonicalTransaction(`${EXTENSION_ID}:update-data`, ops);
+        });
+      }
+      return targetIds;
+    };
+
+    const updateStyle = (rawArgs = {}) => {
+      const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
+      const targetIds = getSelectedChartIds(context, args.entityId);
+      if (targetIds.length === 0) return null;
+
+      const ops = [];
+      for (const id of targetIds) {
+        const current = context.world.getCanonical(id, CHART_ASPECT_ID);
+        if (!current) continue;
+        const nextOptions = { ...(current.options ?? {}) };
+        let optionsChanged = false;
+
+        if (args.options && typeof args.options === 'object' && !Array.isArray(args.options)) {
+          for (const [k, v] of Object.entries(args.options)) {
+            if (v === undefined || v === null) {
+              delete nextOptions[k];
+            } else {
+              nextOptions[k] = v;
+            }
+          }
+          optionsChanged = true;
+        }
+        if ('highlight' in args) {
+          if (args.highlight === undefined || args.highlight === null || args.highlight === 'auto') {
+            delete nextOptions.highlight;
+          } else {
+            nextOptions.highlight = args.highlight;
+          }
+          optionsChanged = true;
+        }
+        if ('neutralColor' in args) {
+          if (!args.neutralColor) {
+            delete nextOptions.neutralColor;
+          } else if (isValidHexColor(args.neutralColor)) {
+            nextOptions.neutralColor = args.neutralColor.trim();
+          }
+          optionsChanged = true;
+        }
+        if ('itemColors' in args) {
+          if (!args.itemColors || (typeof args.itemColors === 'object' && Object.keys(args.itemColors).length === 0 && args.replaceItemColors)) {
+            delete nextOptions.itemColors;
+          } else if (typeof args.itemColors === 'object' && !Array.isArray(args.itemColors)) {
+            const mergedColors = args.replaceItemColors
+              ? {}
+              : { ...(nextOptions.itemColors ?? {}) };
+            for (const [k, v] of Object.entries(args.itemColors)) {
+              const keyStr = String(k ?? '').trim();
+              if (!keyStr) continue;
+              if (!v) {
+                delete mergedColors[keyStr];
+              } else if (isValidHexColor(v)) {
+                mergedColors[keyStr] = v.trim();
+              }
+            }
+            if (Object.keys(mergedColors).length > 0) {
+              nextOptions.itemColors = mergedColors;
+            } else {
+              delete nextOptions.itemColors;
+            }
+          }
+          optionsChanged = true;
+        }
+
+        const patch = {};
+        if (typeof args.theme === 'string' && (args.theme === 'light' || args.theme === 'dark')) {
+          patch.theme = args.theme;
+        }
+        if ('accentColor' in args && isValidHexColor(args.accentColor)) {
+          patch.accentColor = args.accentColor.trim();
+        }
+        if ('backgroundColor' in args) {
+          patch.backgroundColor = isValidHexColor(args.backgroundColor)
+            ? args.backgroundColor.trim()
+            : '';
+        }
+        if (optionsChanged) {
+          patch.options = nextOptions;
+        }
+        if (Object.keys(patch).length > 0) {
+          ops.push({ id, aspect: CHART_ASPECT_ID, patch });
+        }
+      }
+
+      if (ops.length > 0) {
+        withHistoryGroup(context, () => {
+          context.world.applyCanonicalTransaction(`${EXTENSION_ID}:update-style`, ops);
         });
       }
       return targetIds;
@@ -492,6 +610,8 @@ const plugin = {
           return setChartType(args);
         case 'update-data':
           return updateData(args);
+        case 'update-style':
+          return updateStyle(args);
         case 'reset-sample-data':
           return resetSampleData(args);
         case 'apply-top-suggestion':
@@ -546,6 +666,7 @@ const plugin = {
         editChart,
         setChartType,
         updateData,
+        updateStyle,
         resetSampleData,
         applyTopSuggestion,
         editor,
@@ -569,12 +690,15 @@ export {
   CHART_DEFAULTS,
   CHART_FAMILIES,
   CHART_TYPES,
+  COLOR_INSPECTOR_PANEL_ID,
   COMMAND_NAMES,
   EXTENSION_ID,
+  HIGHLIGHT_PRESETS,
   STUDIO_PANEL_ID,
   createPackageManifest,
   createSamplePropsForType,
   deriveChartGeometry,
+  extractChartDataTargets,
   formatRowsAsCsv,
   getChartCatalog,
   matchTextToChartData,
@@ -586,6 +710,8 @@ export {
   renderChartDom,
   renderChartSvg,
   resolveChartSpec,
+  resolveColorForZtdKey,
+  sanitizeItemColors,
   settingsSchema,
   suggestChartsForRows,
 };

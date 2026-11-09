@@ -1,4 +1,4 @@
-import { autoLegend, normalizeData, parseCSV, resolveThemeInput, toCSV } from 'ztd-charts';
+import { autoLegend, luminance, mixHex, normalizeData, parseColor, parseCSV, resolveThemeInput, toCSV } from 'ztd-charts';
 import {
   CHARTS,
   chartsIn,
@@ -51,10 +51,24 @@ export const CHART_DEFAULTS = Object.freeze({
   variant: 'card',
   legendMode: 'auto',
   accentColor: '#3182f6',
+  backgroundColor: '',
   data: [],
   encoding: {},
   options: {},
 });
+
+export const HIGHLIGHT_PRESETS = Object.freeze([
+  { id: 'auto', value: 'auto', labelKo: '자동', labelEn: 'Auto' },
+  { id: 'max', value: 'max', labelKo: '최댓값', labelEn: 'Max' },
+  { id: 'min', value: 'min', labelKo: '최솟값', labelEn: 'Min' },
+  { id: 'first', value: 'first', labelKo: '첫 항목', labelEn: 'First' },
+  { id: 'last', value: 'last', labelKo: '끝 항목', labelEn: 'Last' },
+  { id: 'none', value: 'none', labelKo: '없음', labelEn: 'None' },
+]);
+
+export function isValidHexColor(value) {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim());
+}
 
 const CATALOG_CACHE = {
   ko: Object.freeze(
@@ -114,11 +128,44 @@ export function getLocalizedChartDef(chartType, locale = 'ko') {
   return localizeDef(base, lang);
 }
 
-export function resolveChartTheme(theme = 'light', accentColor = '#3182f6') {
-  const baseName = theme === 'dark' ? 'dark' : 'light';
+export function resolveChartTheme(
+  theme = 'light',
+  accentColor = '#3182f6',
+  backgroundColor = '',
+  neutralColor = '',
+) {
+  const validBg = isValidHexColor(backgroundColor) ? backgroundColor.trim() : '';
+  const validAccent = isValidHexColor(accentColor) ? accentColor.trim() : '';
+  const validNeutral = isValidHexColor(neutralColor) ? neutralColor.trim() : '';
+
+  const parsedBg = validBg ? parseColor(validBg) : null;
+  const baseName = parsedBg
+    ? (luminance(parsedBg) < 0.28 ? 'dark' : 'light')
+    : (theme === 'dark' ? 'dark' : 'light');
   const baseTheme = resolveThemeInput(baseName);
-  if (typeof accentColor === 'string' && /^#[0-9a-f]{6}$/i.test(accentColor)) {
-    return resolveThemeInput({ accent: accentColor, accentText: accentColor }, baseTheme);
+
+  const customTokens = {};
+  if (validAccent) {
+    customTokens.accent = validAccent;
+    customTokens.accentText = validAccent;
+  }
+  if (validBg) {
+    customTokens.bg = validBg;
+    customTokens.panel = validBg;
+    customTokens.line = mixHex(validBg, baseTheme.ink, baseName === 'dark' ? 0.14 : 0.11);
+    customTokens.line2 = mixHex(validBg, baseTheme.ink, baseName === 'dark' ? 0.09 : 0.06);
+    customTokens.lift = mixHex(validBg, baseTheme.ink, baseName === 'dark' ? 0.06 : 0.04);
+    customTokens.neutralSoft = mixHex(validBg, baseTheme.ink, baseName === 'dark' ? 0.1 : 0.08);
+  }
+  if (validNeutral) {
+    const panelRef = validBg || baseTheme.panel;
+    customTokens.neutral = validNeutral;
+    customTokens.neutralStrong = mixHex(validNeutral, baseTheme.ink, 0.28);
+    customTokens.neutralSoft = mixHex(validNeutral, panelRef, 0.72);
+  }
+
+  if (Object.keys(customTokens).length > 0) {
+    return resolveThemeInput({ ...baseTheme, ...customTokens });
   }
   return baseTheme;
 }
@@ -206,6 +253,501 @@ function adaptEncodingForType(chartType, rows, currentEncoding, lang) {
 }
 
 /**
+ * Resolves highlighted indices in the same way as `ztd-charts`'s internal `resolveHighlight`.
+ */
+export function resolveHighlightIndices(highlight, labels = [], values = [], fallback = 'max') {
+  const out = new Set();
+  const n = labels.length;
+  const pick = mode => {
+    if (!n || mode === 'none') return;
+    if (mode === 'first') out.add(0);
+    else if (mode === 'last') out.add(n - 1);
+    else if (mode === 'max' || mode === 'min') {
+      let best = -1;
+      let bv = mode === 'max' ? -Infinity : Infinity;
+      values.forEach((v, i) => {
+        const num = Number(v);
+        if (!Number.isFinite(num)) return;
+        if (mode === 'max' ? num > bv : num < bv) {
+          bv = num;
+          best = i;
+        }
+      });
+      if (best >= 0) out.add(best);
+    }
+  };
+  if (highlight === undefined || highlight === null || highlight === '' || highlight === 'auto') {
+    pick(fallback);
+    return out;
+  }
+  const list = Array.isArray(highlight) ? highlight : [highlight];
+  for (const item of list) {
+    if (typeof item === 'number') {
+      if (item >= 0 && item < n) out.add(item);
+    } else if (item === 'max' || item === 'min' || item === 'first' || item === 'last' || item === 'none') {
+      pick(item);
+    } else if (typeof item === 'string') {
+      labels.forEach((l, i) => {
+        if (String(l) === item) out.add(i);
+      });
+    }
+  }
+  return out;
+}
+
+export function sanitizeItemColors(rawItemColors) {
+  if (!isPlainRecord(rawItemColors)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(rawItemColors)) {
+    const key = String(k ?? '').trim();
+    if (!key || !isValidHexColor(v)) continue;
+    out[key] = v.trim();
+  }
+  return out;
+}
+
+function uniqueStrings(items) {
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    const str = String(item ?? '').trim();
+    if (!str || seen.has(str)) continue;
+    seen.add(str);
+    out.push(str);
+  }
+  return out;
+}
+
+function defaultCategoricalSwatches(resolvedTheme, count, hiSet) {
+  const out = new Array(count);
+  const rest = [];
+  for (let i = 0; i < count; i++) {
+    if (hiSet.has(i)) out[i] = resolvedTheme.accent;
+    else rest.push(i);
+  }
+  const k = rest.length;
+  rest.forEach((idx, j) => {
+    if (k === 1) out[idx] = resolvedTheme.neutral;
+    else if (j === 0) out[idx] = resolvedTheme.ink;
+    else if (j === k - 1) out[idx] = resolvedTheme.neutral;
+    else if (k === 3) out[idx] = resolvedTheme.neutralStrong;
+    else {
+      const t = (j - 1) / Math.max(1, k - 2);
+      out[idx] = t <= 1e-3 ? resolvedTheme.neutralStrong : mixHex(resolvedTheme.neutralStrong, resolvedTheme.neutral, 1 - t);
+    }
+  });
+  return out;
+}
+
+function attachTargetMetadata(items, kind = 'category') {
+  const normalized = items.map(it => ({
+    ...it,
+    id: it.id ?? it.key,
+    key: it.key ?? it.id,
+  }));
+  Object.defineProperty(normalized, 'items', {
+    value: normalized,
+    enumerable: false,
+  });
+  Object.defineProperty(normalized, 'kind', {
+    value: kind,
+    enumerable: false,
+  });
+  return normalized;
+}
+
+/**
+ * Extracts selectable data components (series, categories, slices, nodes, or up/down)
+ * for highlight selection and per-component color customization.
+ */
+export function extractChartDataTargets(
+  chartType,
+  rows = [],
+  encoding = {},
+  options = {},
+  resolvedTheme = resolveChartTheme('light'),
+  localeTag = 'ko-KR',
+) {
+  const safeType = normalizeChartType(chartType);
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const enc = isPlainRecord(encoding) ? encoding : {};
+  const opt = isPlainRecord(options) ? options : {};
+  const itemColors = sanitizeItemColors(opt.itemColors);
+  const lang = normalizeLang(localeTag);
+
+  if (safeType === 'candlestick') {
+    const upCustom = isValidHexColor(opt.upColor) ? opt.upColor.trim() : itemColors.up;
+    const downCustom = isValidHexColor(opt.downColor) ? opt.downColor.trim() : itemColors.down;
+    return attachTargetMetadata([
+      {
+        id: 'up',
+        key: 'up',
+        label: lang === 'en' ? 'Up (Bullish)' : '상승(양봉)',
+        kind: 'candle',
+        defaultColor: resolvedTheme.accent,
+        customColor: upCustom || '',
+        effectiveColor: upCustom || resolvedTheme.accent,
+        highlighted: true,
+      },
+      {
+        id: 'down',
+        key: 'down',
+        label: lang === 'en' ? 'Down (Bearish)' : '하락(음봉)',
+        kind: 'candle',
+        defaultColor: resolvedTheme.neutralStrong,
+        customColor: downCustom || '',
+        effectiveColor: downCustom || resolvedTheme.neutralStrong,
+        highlighted: false,
+      },
+    ], 'updown');
+  }
+
+  // Check if chart is multi-series
+  const seriesCol = typeof enc.series === 'string' ? enc.series : null;
+  const wideSeries = Array.isArray(enc.y) ? enc.y.map(String) : [];
+  const frontFields = Array.isArray(enc.front) ? enc.front.map(String) : (typeof enc.front === 'string' ? [enc.front] : []);
+  const backFields = Array.isArray(enc.back) ? enc.back.map(String) : (typeof enc.back === 'string' ? [enc.back] : []);
+
+  if (safeType === 'skyline' && (backFields.length > 0 || frontFields.length > 0)) {
+    const names = uniqueStrings([...backFields, ...frontFields]);
+    const hiSet = resolveHighlightIndices(opt.highlight, names, names.map(() => 0), 'first');
+    const defaults = defaultCategoricalSwatches(resolvedTheme, names.length, hiSet);
+    return attachTargetMetadata(names.map((name, i) => ({
+      id: name,
+      label: name,
+      kind: 'series',
+      defaultColor: defaults[i] || resolvedTheme.neutral,
+      customColor: itemColors[name] || '',
+      effectiveColor: itemColors[name] || defaults[i] || resolvedTheme.neutral,
+      highlighted: hiSet.has(i),
+    })), 'series');
+  }
+
+  let seriesList = [];
+  if (wideSeries.length >= 2) {
+    seriesList = wideSeries;
+  } else if (seriesCol && safeRows.length > 0) {
+    seriesList = uniqueStrings(safeRows.map(r => r?.[seriesCol]));
+  }
+
+  const isMultiSeriesChart =
+    ['line', 'area', 'stream', 'radar', 'bump', 'marimekko'].includes(safeType)
+    || (['bar', 'scatter', 'bubble', 'histogram'].includes(safeType) && seriesList.length >= 2);
+
+  if (isMultiSeriesChart && seriesList.length >= 1) {
+    const valCol = typeof enc.y === 'string' ? enc.y : (typeof enc.value === 'string' ? enc.value : 'value');
+    const totals = seriesList.map(sName => {
+      if (wideSeries.includes(sName)) {
+        return safeRows.reduce((acc, r) => acc + (Number(r?.[sName]) || 0), 0);
+      }
+      return safeRows
+        .filter(r => String(r?.[seriesCol] ?? '') === sName)
+        .reduce((acc, r) => acc + (Number(r?.[valCol]) || 0), 0);
+    });
+    const fallbackRule = ['stream', 'bump'].includes(safeType) ? 'max' : 'first';
+    const hiSet = resolveHighlightIndices(opt.highlight, seriesList, totals, fallbackRule);
+    const defaults = ['line', 'radar', 'bump'].includes(safeType)
+      ? seriesList.map((_, i) => (hiSet.has(i) ? resolvedTheme.accent : resolvedTheme.neutralStrong))
+      : defaultCategoricalSwatches(resolvedTheme, seriesList.length, hiSet);
+
+    return attachTargetMetadata(seriesList.map((name, i) => ({
+      id: name,
+      label: name,
+      kind: 'series',
+      defaultColor: defaults[i] || resolvedTheme.neutral,
+      customColor: itemColors[name] || '',
+      effectiveColor: itemColors[name] || defaults[i] || resolvedTheme.neutral,
+      highlighted: hiSet.has(i),
+    })), 'series');
+  }
+
+  // Group-based distribution charts (`ridgeline`, `box`, `beeswarm` with group)
+  const groupCol = typeof enc.group === 'string' ? enc.group : null;
+  if (['ridgeline', 'box', 'beeswarm'].includes(safeType) && groupCol) {
+    const groups = uniqueStrings(safeRows.map(r => r?.[groupCol]));
+    const valCol = typeof enc.value === 'string' ? enc.value : (typeof enc.y === 'string' ? enc.y : 'value');
+    const groupVals = groups.map(g => {
+      const nums = safeRows
+        .filter(r => String(r?.[groupCol] ?? '') === g)
+        .map(r => Number(r?.[valCol]))
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b);
+      return nums.length ? nums[Math.floor(nums.length / 2)] : 0;
+    });
+    const hiSet = resolveHighlightIndices(opt.highlight, groups, groupVals, 'max');
+    return attachTargetMetadata(groups.map((name, i) => {
+      const defColor = hiSet.has(i) ? resolvedTheme.accent : resolvedTheme.neutralStrong;
+      return {
+        id: name,
+        label: name,
+        kind: 'group',
+        defaultColor: defColor,
+        customColor: itemColors[name] || '',
+        effectiveColor: itemColors[name] || defColor,
+        highlighted: hiSet.has(i),
+      };
+    }), 'group');
+  }
+
+  // Flow charts (`sankey`, `chord`) -> unique nodes
+  if (safeType === 'sankey' || safeType === 'chord') {
+    const srcCol = typeof enc.source === 'string' ? enc.source : (typeof enc.from === 'string' ? enc.from : 'source');
+    const tgtCol = typeof enc.target === 'string' ? enc.target : (typeof enc.to === 'string' ? enc.to : 'target');
+    const valCol = typeof enc.value === 'string' ? enc.value : 'value';
+    const nodes = uniqueStrings(safeRows.flatMap(r => [r?.[srcCol], r?.[tgtCol]]));
+    const totals = nodes.map(n => safeRows.reduce((acc, r) => (
+      String(r?.[srcCol] ?? '') === n || String(r?.[tgtCol] ?? '') === n
+        ? acc + (Number(r?.[valCol]) || 0)
+        : acc
+    ), 0));
+    const hiSet = resolveHighlightIndices(opt.highlight, nodes, totals, 'max');
+    return attachTargetMetadata(nodes.map((name, i) => {
+      const defColor = hiSet.has(i) ? resolvedTheme.accent : resolvedTheme.ink;
+      return {
+        id: name,
+        label: name,
+        kind: 'node',
+        defaultColor: defColor,
+        customColor: itemColors[name] || '',
+        effectiveColor: itemColors[name] || defColor,
+        highlighted: hiSet.has(i),
+      };
+    }), 'node');
+  }
+
+  // Hierarchy charts (`treemap`, `sunburst`)
+  if (safeType === 'treemap' || safeType === 'sunburst') {
+    const labelCol = typeof enc.label === 'string' ? enc.label : 'label';
+    const parentCol = typeof enc.group === 'string' ? enc.group : (typeof enc.parent === 'string' ? enc.parent : null);
+    const valCol = typeof enc.value === 'string' ? enc.value : 'value';
+    const items = [];
+    const vals = [];
+    for (const r of safeRows) {
+      const lbl = String(r?.[labelCol] ?? '').trim();
+      if (!lbl) continue;
+      const par = parentCol ? String(r?.[parentCol] ?? '').trim() : '';
+      items.push({ id: lbl, label: par ? `${par} · ${lbl}` : lbl, group: par });
+      vals.push(Number(r?.[valCol]) || 0);
+    }
+    const labels = items.map(it => it.id);
+    const hiSet = resolveHighlightIndices(opt.highlight, labels, vals, 'max');
+    return attachTargetMetadata(items.map((it, i) => {
+      const custom = itemColors[it.id] || (it.group ? itemColors[it.group] : '') || '';
+      const defColor = hiSet.has(i) ? resolvedTheme.accent : resolvedTheme.neutral;
+      return {
+        id: it.id,
+        label: it.label,
+        kind: 'item',
+        defaultColor: defColor,
+        customColor: custom,
+        effectiveColor: custom || defColor,
+        highlighted: hiSet.has(i),
+      };
+    }), 'hierarchy');
+  }
+
+  // Standard category / item charts (`bar` single-series, `pie`, `donut`, `waffle`, `funnel`, `pareto`, `waterfall`, `radialBar`, `bullet`, `slope`, `dumbbell`, `lollipop`, `segmented`, `parallel`, `bubble`, `scatter`, etc.)
+  const labelKey =
+    enc.label
+    || enc.x
+    || enc.stage
+    || enc.category
+    || enc.item
+    || (safeRows[0] ? Object.keys(safeRows[0]).find(k => typeof safeRows[0][k] === 'string') : 'label')
+    || 'label';
+  const valueKey =
+    (typeof enc.y === 'string' ? enc.y : (Array.isArray(enc.y) ? enc.y[0] : null))
+    || enc.value
+    || enc.end
+    || enc.after
+    || enc.size
+    || (safeRows[0] ? Object.keys(safeRows[0]).find(k => typeof safeRows[0][k] === 'number') : 'value')
+    || 'value';
+
+  const labels = [];
+  const values = [];
+  for (let i = 0; i < safeRows.length; i++) {
+    const row = safeRows[i];
+    const lbl = String(row?.[labelKey] ?? `${i + 1}`).trim();
+    if (!lbl) continue;
+    labels.push(lbl);
+    values.push(Number(row?.[valueKey]) || 0);
+  }
+
+  const uniqueLabels = uniqueStrings(labels);
+  const displayLabels = uniqueLabels.slice(0, 24);
+  const displayValues = displayLabels.map(lbl => {
+    const idx = labels.indexOf(lbl);
+    return idx >= 0 ? values[idx] : 0;
+  });
+
+  const fallbackRule =
+    safeType === 'waffle' || safeType === 'parallel'
+      ? 'first'
+      : safeType === 'bullet'
+        ? 'min'
+        : 'max';
+  const hiSet = resolveHighlightIndices(opt.highlight, displayLabels, displayValues, fallbackRule);
+  const categoricalCharts = new Set(['pie', 'donut', 'waffle', 'segmented']);
+  const defaults = categoricalCharts.has(safeType)
+    ? defaultCategoricalSwatches(resolvedTheme, displayLabels.length, hiSet)
+    : displayLabels.map((_, i) => (hiSet.has(i) ? resolvedTheme.accent : resolvedTheme.neutral));
+
+  return attachTargetMetadata(displayLabels.map((lbl, i) => ({
+    id: lbl,
+    label: lbl,
+    kind: 'item',
+    defaultColor: defaults[i] || resolvedTheme.neutral,
+    customColor: itemColors[lbl] || '',
+    effectiveColor: itemColors[lbl] || defaults[i] || resolvedTheme.neutral,
+    highlighted: hiSet.has(i),
+  })), 'category');
+}
+
+/**
+ * Resolves a custom `#rrggbb` color for an SVG element given its `data-ztd-key` or `data-k`.
+ */
+export function resolveColorForZtdKey(
+  chartType,
+  ztdKey,
+  dataK,
+  isMark,
+  itemColors = {},
+  dataTargets = [],
+  rows = [],
+  encoding = {},
+) {
+  if (!isPlainRecord(itemColors) || Object.keys(itemColors).length === 0) return null;
+  const targetList = Array.isArray(dataTargets) ? dataTargets : (dataTargets?.items ?? []);
+
+  // Waffle cell `data-k` index
+  if (dataK !== undefined && dataK !== null && dataK !== '') {
+    const kIdx = Number(dataK);
+    if (Number.isFinite(kIdx) && kIdx >= 0 && targetList[kIdx]) {
+      const c = itemColors[targetList[kIdx].id ?? targetList[kIdx].key];
+      if (isValidHexColor(c)) return c;
+    }
+  }
+
+  const key = String(ztdKey ?? '').trim();
+  if (!key) return null;
+
+  if (isValidHexColor(itemColors[key])) {
+    return itemColors[key];
+  }
+
+  // `bar` and `marimekko`: `${cat}|${series}`
+  if (key.includes('|')) {
+    const [cat, series] = key.split('|');
+    if (series && isValidHexColor(itemColors[series])) return itemColors[series];
+    if (cat && isValidHexColor(itemColors[cat])) return itemColors[cat];
+    return null;
+  }
+
+  // `bubble` and `scatter`: `b${rowIndex}:${label}`
+  const bubbleMatch = key.match(/^b(\d+):(.*)$/);
+  if (bubbleMatch) {
+    const rowIdx = Number(bubbleMatch[1]);
+    const lbl = bubbleMatch[2];
+    if (lbl && isValidHexColor(itemColors[lbl])) return itemColors[lbl];
+    const seriesCol = typeof encoding?.series === 'string' ? encoding.series : null;
+    if (seriesCol && rows[rowIdx]) {
+      const sVal = String(rows[rowIdx][seriesCol] ?? '');
+      if (sVal && isValidHexColor(itemColors[sVal])) return itemColors[sVal];
+    }
+    return null;
+  }
+
+  // `treemap` (`t:group/label`) and `sunburst` (`a:parent/label`)
+  if (key.startsWith('t:') || key.startsWith('a:')) {
+    const body = key.slice(2);
+    if (isValidHexColor(itemColors[body])) return itemColors[body];
+    if (body.includes('/')) {
+      const [parent, leaf] = body.split('/');
+      if (leaf && isValidHexColor(itemColors[leaf])) return itemColors[leaf];
+      if (parent && isValidHexColor(itemColors[parent])) return itemColors[parent];
+    }
+    return null;
+  }
+
+  // `sankey` node (`n:name`) or link (`l:source>target`)
+  if (key.startsWith('n:')) {
+    const nodeName = key.slice(2);
+    return isValidHexColor(itemColors[nodeName]) ? itemColors[nodeName] : null;
+  }
+  if (key.startsWith('l:') && key.includes('>')) {
+    const linkBody = key.slice(2);
+    if (isValidHexColor(itemColors[linkBody])) return itemColors[linkBody];
+    const [src, tgt] = linkBody.split('>');
+    if (src && isValidHexColor(itemColors[src])) return itemColors[src];
+    if (tgt && isValidHexColor(itemColors[tgt])) return itemColors[tgt];
+    return null;
+  }
+
+  // `parallel` (`p:rowIndex`)
+  if (key.startsWith('p:')) {
+    const idx = Number(key.slice(2));
+    if (Number.isFinite(idx) && targetList[idx]) {
+      const c = itemColors[targetList[idx].id ?? targetList[idx].key];
+      if (isValidHexColor(c)) return c;
+    }
+    return null;
+  }
+
+  // Standard prefixes `s:`, `r:`, `b:`, `w:`, `d:`, `l:`
+  const prefixMatch = key.match(/^[srbwdl]:(.*)$/);
+  if (prefixMatch) {
+    const name = prefixMatch[1];
+    if (name && isValidHexColor(itemColors[name])) return itemColors[name];
+    return null;
+  }
+
+  // `segmented` inline legend `l0`, `l1`, ...
+  if (chartType === 'segmented' && /^l(\d+)$/.test(key)) {
+    const idx = Number(key.slice(1));
+    if (Number.isFinite(idx) && targetList[idx]) {
+      const c = itemColors[targetList[idx].id ?? targetList[idx].key];
+      if (isValidHexColor(c)) return c;
+    }
+    return null;
+  }
+
+  // `beeswarm` (`b0`, `b1`, ...)
+  if (chartType === 'beeswarm' && /^b(\d+)$/.test(key)) {
+    const rowIdx = Number(key.slice(1));
+    const groupCol = typeof encoding?.group === 'string' ? encoding.group : 'group';
+    const labelCol = typeof encoding?.label === 'string' ? encoding.label : 'label';
+    const row = rows[rowIdx];
+    if (row) {
+      const gVal = String(row[groupCol] ?? '');
+      const lVal = String(row[labelCol] ?? '');
+      if (gVal && isValidHexColor(itemColors[gVal])) return itemColors[gVal];
+      if (lVal && isValidHexColor(itemColors[lVal])) return itemColors[lVal];
+    }
+    return null;
+  }
+
+  // Numeric keys (`funnel` marks, `donut` inline legend, `chord` groups, `skyline` legend)
+  if (/^\d+$/.test(key)) {
+    const idx = Number(key);
+    if (
+      (chartType === 'funnel' && isMark)
+      || (chartType === 'donut' && !isMark)
+      || (chartType === 'chord' && !isMark)
+      || (chartType === 'skyline' && !isMark)
+    ) {
+      const target = targetList[idx];
+      const targetKey = target?.id ?? target?.key;
+      if (targetKey && isValidHexColor(itemColors[targetKey])) {
+        return itemColors[targetKey];
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Resolves canonical aspect props into a validated `ztd-charts` ChartSpec and metadata.
  */
 export function resolveChartSpec(rawProps = {}) {
@@ -215,8 +757,8 @@ export function resolveChartSpec(rawProps = {}) {
   const themeName = rawProps.theme === 'dark' ? 'dark' : 'light';
   const variant = rawProps.variant === 'bare' ? 'bare' : 'card';
   const legendMode = ['auto', 'true', 'false'].includes(rawProps.legendMode) ? rawProps.legendMode : 'auto';
-  const accentColor = typeof rawProps.accentColor === 'string' && /^#[0-9a-f]{6}$/i.test(rawProps.accentColor)
-    ? rawProps.accentColor
+  const accentColor = isValidHexColor(rawProps.accentColor)
+    ? rawProps.accentColor.trim()
     : CHART_DEFAULTS.accentColor;
 
   const def = getLocalizedChartDef(chartType, lang);
@@ -226,10 +768,33 @@ export function resolveChartSpec(rawProps = {}) {
   const customEncoding = isPlainRecord(rawProps.encoding) ? { ...rawProps.encoding } : {};
   const customOptions = isPlainRecord(rawProps.options) ? { ...rawProps.options } : {};
   const textOverrides = isPlainRecord(customOptions.textOverrides) ? { ...customOptions.textOverrides } : {};
+  const itemColors = sanitizeItemColors(customOptions.itemColors);
+
+  const backgroundColor = isValidHexColor(rawProps.backgroundColor)
+    ? rawProps.backgroundColor.trim()
+    : isValidHexColor(customOptions.backgroundColor)
+      ? customOptions.backgroundColor.trim()
+      : '';
+  const neutralColor = isValidHexColor(customOptions.neutralColor)
+    ? customOptions.neutralColor.trim()
+    : '';
+
+  const resolvedTheme = resolveChartTheme(themeName, accentColor, backgroundColor, neutralColor);
 
   let effectiveRows = example.data;
   let effectiveEncoding = { ...(example.encoding ?? {}) };
   let effectiveOptions = { ...(example.options ?? {}), ...customOptions, locale: localeTag };
+  if (customOptions.highlight === 'auto') {
+    delete effectiveOptions.highlight;
+  }
+  if (chartType === 'candlestick') {
+    if (isValidHexColor(itemColors.up) && !isValidHexColor(effectiveOptions.upColor)) {
+      effectiveOptions.upColor = itemColors.up;
+    }
+    if (isValidHexColor(itemColors.down) && !isValidHexColor(effectiveOptions.downColor)) {
+      effectiveOptions.downColor = itemColors.down;
+    }
+  }
   let usingSampleData = true;
 
   if (customRows.length > 0) {
@@ -262,6 +827,24 @@ export function resolveChartSpec(rawProps = {}) {
     }
   }
 
+  const dataTargets = extractChartDataTargets(
+    chartType,
+    effectiveRows,
+    effectiveEncoding,
+    effectiveOptions,
+    resolvedTheme,
+    localeTag,
+  );
+
+  // If gauge or sparkline has a single target with a custom color, reflect it in resolvedTheme
+  const singleTargetCustomColor =
+    (chartType === 'gauge' || chartType === 'sparkline') && dataTargets[0]?.customColor
+      ? dataTargets[0].customColor
+      : '';
+  const finalTheme = singleTargetCustomColor
+    ? resolveChartTheme(themeName, singleTargetCustomColor, backgroundColor, neutralColor)
+    : resolvedTheme;
+
   const title = textOverrides['field:title'] !== undefined
     ? String(textOverrides['field:title'])
     : typeof rawProps.title === 'string' && rawProps.title.length > 0
@@ -288,7 +871,46 @@ export function resolveChartSpec(rawProps = {}) {
       ? String(customOptions.cardLevel)
       : (example.card?.level !== undefined ? String(example.card.level) : '');
 
-  const cardLegend = legendMode === 'false' ? false : 'auto';
+  const baseSpecForLegend = {
+    type: chartType,
+    data: effectiveRows,
+    encoding: effectiveEncoding,
+    options: effectiveOptions,
+  };
+
+  let legendItems = [];
+  if (variant === 'card' && legendMode !== 'false') {
+    try {
+      const computed = autoLegend(baseSpecForLegend, effectiveRows, localeTag);
+      if (Array.isArray(computed)) {
+        legendItems = computed.map((item, idx) => {
+          const baseLabel = String(item?.label ?? '');
+          const override = textOverrides[`legend:${idx}`] ?? textOverrides[`text:${baseLabel}`];
+          const customColor =
+            itemColors[baseLabel]
+            || (chartType === 'candlestick' && idx === 0 ? itemColors.up : '')
+            || (chartType === 'candlestick' && idx === 1 ? itemColors.down : '');
+          return {
+            ...item,
+            ...(override !== undefined ? { label: String(override) } : {}),
+            ...(isValidHexColor(customColor) ? { color: customColor } : {}),
+          };
+        });
+      }
+    } catch {
+      legendItems = [];
+    }
+  }
+
+  const hasLegendOverrides = legendItems.some((item, idx) => (
+    textOverrides[`legend:${idx}`] !== undefined
+    || textOverrides[`text:${item?.label}`] !== undefined
+    || isValidHexColor(item?.color)
+  ));
+  const cardLegend = legendMode === 'false'
+    ? false
+    : (hasLegendOverrides && legendItems.length > 0 ? legendItems : 'auto');
+
   const card = variant === 'card'
     ? {
         ...(example.card ?? {}),
@@ -310,29 +932,18 @@ export function resolveChartSpec(rawProps = {}) {
     ...(card ? { card } : {}),
   };
 
-  let legendItems = [];
-  if (variant === 'card' && legendMode !== 'false') {
-    try {
-      const computed = autoLegend(spec, effectiveRows, localeTag);
-      if (Array.isArray(computed)) {
-        legendItems = computed.map((item, idx) => {
-          const baseLabel = String(item?.label ?? '');
-          const override = textOverrides[`legend:${idx}`] ?? textOverrides[`text:${baseLabel}`];
-          return override !== undefined ? { ...item, label: String(override) } : item;
-        });
-      }
-    } catch {
-      legendItems = [];
-    }
-  }
-
   return {
     chartType,
     lang,
     localeTag,
     themeName,
     accentColor,
-    resolvedTheme: resolveChartTheme(themeName, accentColor),
+    backgroundColor,
+    neutralColor,
+    highlight: customOptions.highlight ?? 'auto',
+    itemColors,
+    dataTargets,
+    resolvedTheme: finalTheme,
     variant,
     legendMode,
     title,
