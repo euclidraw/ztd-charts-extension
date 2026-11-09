@@ -16,6 +16,7 @@ import {
   DEFAULT_CHART_HEIGHT,
   DEFAULT_CHART_WIDTH,
   HIGHLIGHT_PRESETS,
+  ITEM_COLOR_SLOT_COUNT,
   QUICK_CHART_OPTIONS,
   createSamplePropsForType,
   deriveChartGeometry,
@@ -32,11 +33,7 @@ import {
   sanitizeItemColors,
   suggestChartsForRows,
 } from './model.js';
-import {
-  COLOR_INSPECTOR_PANEL_ID,
-  createColorInspectorPanelSpec,
-  createStudioPanelSpec,
-} from './panel.js';
+import { createStudioPanelSpec } from './panel.js';
 import { renderChartSvg } from './svg-renderer.js';
 import { planZtdChartChanges, registerZtdChartTools } from './tools.js';
 
@@ -265,6 +262,34 @@ export const ztdChartAspect = Object.freeze({
         options: HIGHLIGHT_PRESETS.map(preset => ({ label: preset.labelKo, value: preset.id })),
       },
       {
+        id: 'ztd-charts.background.transparent',
+        kind: 'action',
+        label: '배경 투명',
+        commandSymbol: `${EXTENSION_ID}:update-style`,
+        params: { backgroundColor: 'transparent' },
+        section: '강조 및 색상',
+        placement: 'inspector',
+        requiresSelection: true,
+      },
+      {
+        id: 'ztd-charts.background.reset',
+        kind: 'action',
+        label: '배경 기본값',
+        commandSymbol: `${EXTENSION_ID}:update-style`,
+        params: { backgroundColor: '' },
+        section: '강조 및 색상',
+        placement: 'inspector',
+        requiresSelection: true,
+      },
+      {
+        id: 'ztd-charts.neutral.inspector',
+        kind: 'color',
+        field: 'neutralColor',
+        label: '기본 데이터색',
+        section: '세부 색상',
+        placement: 'inspector',
+      },
+      {
         id: 'ztd-charts.suggest.inspector',
         kind: 'action',
         label: '데이터 맞춤 추천 차트 적용',
@@ -284,7 +309,7 @@ export const ztdChartAspect = Object.freeze({
         requiresSelection: true,
       },
     ],
-    panels: [createColorInspectorPanelSpec(), createStudioPanelSpec()],
+    panels: [createStudioPanelSpec()],
   },
 });
 
@@ -344,6 +369,44 @@ const plugin = {
     const disposers = [];
     const editor = mountInlineEditor(context);
     disposers.push(() => editor.dispose());
+
+    // Per-item colors are canonical slots so the host color row can bind them.
+    // Labels follow the selected chart's data targets (상승(양봉), a category, …).
+    const workbench = context.services?.get?.('ui.workbench');
+    let itemColorSignature = '';
+    let releaseItemColors = () => {};
+    const syncItemColorControls = () => {
+      const selectedId = getSelectedChartIds(context)[0];
+      const current = selectedId ? context.world.getCanonical(selectedId, CHART_ASPECT_ID) : null;
+      const resolved = current ? resolveChartSpec(current) : null;
+      const slots = resolved?.itemColorSlots ?? [];
+      const signature = slots.map(slot => `${slot.slot}:${slot.label}`).join('|');
+      if (signature === itemColorSignature) return;
+      itemColorSignature = signature;
+      releaseItemColors();
+      releaseItemColors = () => {};
+      if (!slots.length || typeof workbench?.register !== 'function') return;
+      releaseItemColors = workbench.register(`${EXTENSION_ID}.item-colors`, {
+        controls: slots.map(slot => ({
+          id: `ztd-charts.item-color.${slot.slot}`,
+          kind: 'color',
+          aspectId: CHART_ASPECT_ID,
+          field: `itemColor${slot.slot}`,
+          label: slot.label,
+          section: '세부 색상',
+          placement: 'inspector',
+        })),
+      }, { aspectId: CHART_ASPECT_ID });
+    };
+    const selectionSurface = context.services?.get?.('canvas.active-tool-surface');
+    const offSurface = selectionSurface?.subscribe?.(() => syncItemColorControls());
+    const offWorld = context.world?.subscribe?.(() => syncItemColorControls());
+    syncItemColorControls();
+    disposers.push(() => {
+      offSurface?.();
+      offWorld?.();
+      releaseItemColors();
+    });
 
     const editChart = (rawArgs = {}) => {
       const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
@@ -528,16 +591,16 @@ const plugin = {
           optionsChanged = true;
         }
         if ('neutralColor' in args) {
-          if (!args.neutralColor) {
-            delete nextOptions.neutralColor;
-          } else if (isValidHexColor(args.neutralColor)) {
-            nextOptions.neutralColor = args.neutralColor.trim();
-          }
+          const hex = isValidHexColor(args.neutralColor) ? args.neutralColor.trim() : '';
+          patch.neutralColor = hex;
+          if (hex) nextOptions.neutralColor = hex;
+          else delete nextOptions.neutralColor;
           optionsChanged = true;
         }
         if ('itemColors' in args) {
           if (!args.itemColors || (typeof args.itemColors === 'object' && Object.keys(args.itemColors).length === 0 && args.replaceItemColors)) {
             delete nextOptions.itemColors;
+            for (let slot = 0; slot < ITEM_COLOR_SLOT_COUNT; slot += 1) patch[`itemColor${slot}`] = '';
           } else if (typeof args.itemColors === 'object' && !Array.isArray(args.itemColors)) {
             const mergedColors = args.replaceItemColors
               ? {}
@@ -555,6 +618,18 @@ const plugin = {
               nextOptions.itemColors = mergedColors;
             } else {
               delete nextOptions.itemColors;
+            }
+            // Keep host color rows in step with the option map for the current targets.
+            const resolvedNow = resolveChartSpec({ ...current, options: nextOptions });
+            for (let slot = 0; slot < ITEM_COLOR_SLOT_COUNT; slot += 1) {
+              const target = resolvedNow.dataTargets?.[slot];
+              if (!target) {
+                patch[`itemColor${slot}`] = '';
+                continue;
+              }
+              if (Object.prototype.hasOwnProperty.call(args.itemColors, target.key) || args.replaceItemColors) {
+                patch[`itemColor${slot}`] = isValidHexColor(mergedColors[target.key]) ? mergedColors[target.key] : '';
+              }
             }
           }
           optionsChanged = true;
@@ -756,7 +831,6 @@ export {
   CHART_DEFAULTS,
   CHART_FAMILIES,
   CHART_TYPES,
-  COLOR_INSPECTOR_PANEL_ID,
   COMMAND_NAMES,
   EXTENSION_ID,
   HIGHLIGHT_PRESETS,

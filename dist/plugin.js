@@ -4,7 +4,7 @@ import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 var extension_default = {
 	id: "diagram.ztd-charts",
 	title: "ZTD 차트",
-	version: "0.1.7",
+	version: "0.1.8",
 	summary: "36종의 zero-dependency 통계·비즈니스 차트를 캔버스 도형, 정적 SVG, 데이터 스튜디오 패널 및 코파일럿 도구로 제공하는 확장",
 	engine: "^0.1.1",
 	dependencies: {},
@@ -22860,6 +22860,15 @@ var CHART_DEFAULTS = Object.freeze({
 	accentColor: "#3182f6",
 	backgroundColor: "",
 	highlightMode: "auto",
+	neutralColor: "",
+	itemColor0: "",
+	itemColor1: "",
+	itemColor2: "",
+	itemColor3: "",
+	itemColor4: "",
+	itemColor5: "",
+	itemColor6: "",
+	itemColor7: "",
 	cornerRadius: 0,
 	data: [],
 	encoding: {},
@@ -23525,10 +23534,14 @@ function resolveChartSpec(rawProps = {}) {
 	const highlightMode = HIGHLIGHT_PRESETS.some((preset) => preset.id === rawProps.highlightMode) ? rawProps.highlightMode : "auto";
 	if (highlightMode !== "auto") customOptions.highlight = highlightMode;
 	const textOverrides = isPlainRecord$1(customOptions.textOverrides) ? { ...customOptions.textOverrides } : {};
-	const itemColors = sanitizeItemColors(customOptions.itemColors);
+	const itemColors = { ...sanitizeItemColors(customOptions.itemColors) };
+	const neutralColor = isValidHexColor(rawProps.neutralColor) ? rawProps.neutralColor.trim() : isValidHexColor(customOptions.neutralColor) ? customOptions.neutralColor.trim() : "";
+	if (neutralColor) customOptions.neutralColor = neutralColor;
+	else delete customOptions.neutralColor;
+	const slotColors = [];
+	for (let slot = 0; slot < 8; slot += 1) slotColors.push(isValidHexColor(rawProps[`itemColor${slot}`]) ? rawProps[`itemColor${slot}`].trim() : "");
 	const backgroundColor = resolveBackgroundColor(rawProps.backgroundColor) || resolveBackgroundColor(customOptions.backgroundColor);
 	const themeBackground = backgroundColor === "transparent" ? "" : backgroundColor;
-	const neutralColor = isValidHexColor(customOptions.neutralColor) ? customOptions.neutralColor.trim() : "";
 	const cornerRadius = resolveCornerRadius(rawProps.cornerRadius);
 	const resolvedTheme = {
 		...resolveChartTheme(themeName, accentColor, themeBackground, neutralColor),
@@ -23542,10 +23555,6 @@ function resolveChartSpec(rawProps = {}) {
 		locale: localeTag
 	};
 	if (customOptions.highlight === "auto") delete effectiveOptions.highlight;
-	if (chartType === "candlestick") {
-		if (isValidHexColor(itemColors.up) && !isValidHexColor(effectiveOptions.upColor)) effectiveOptions.upColor = itemColors.up;
-		if (isValidHexColor(itemColors.down) && !isValidHexColor(effectiveOptions.downColor)) effectiveOptions.downColor = itemColors.down;
-	}
 	let usingSampleData = true;
 	if (customRows.length > 0) {
 		const candidateDirect = {
@@ -23573,6 +23582,23 @@ function resolveChartSpec(rawProps = {}) {
 				}
 			}
 		}
+	}
+	extractChartDataTargets(chartType, effectiveRows, effectiveEncoding, {
+		...effectiveOptions,
+		...customOptions,
+		itemColors
+	}, resolvedTheme, localeTag).slice(0, 8).forEach((target, slot) => {
+		if (slotColors[slot]) itemColors[target.key] = slotColors[slot];
+	});
+	if (Object.keys(itemColors).length > 0) customOptions.itemColors = itemColors;
+	else delete customOptions.itemColors;
+	effectiveOptions = {
+		...effectiveOptions,
+		...customOptions
+	};
+	if (chartType === "candlestick") {
+		if (isValidHexColor(itemColors.up) && !isValidHexColor(effectiveOptions.upColor)) effectiveOptions.upColor = itemColors.up;
+		if (isValidHexColor(itemColors.down) && !isValidHexColor(effectiveOptions.downColor)) effectiveOptions.downColor = itemColors.down;
 	}
 	const dataTargets = extractChartDataTargets(chartType, effectiveRows, effectiveEncoding, effectiveOptions, resolvedTheme, localeTag);
 	const singleTargetCustomColor = (chartType === "gauge" || chartType === "sparkline") && dataTargets[0]?.customColor ? dataTargets[0].customColor : "";
@@ -23634,6 +23660,12 @@ function resolveChartSpec(rawProps = {}) {
 		backgroundColor,
 		cornerRadius,
 		neutralColor,
+		itemColorSlots: dataTargets.slice(0, 8).map((target, slot) => ({
+			slot,
+			key: target.key,
+			label: target.label,
+			color: isValidHexColor(itemColors[target.key]) ? itemColors[target.key] : ""
+		})),
 		highlightMode,
 		highlight: customOptions.highlight ?? "auto",
 		itemColors,
@@ -25606,22 +25638,6 @@ function mountInlineEditor(context) {
 	};
 }
 // src/panel.js
-var COLOR_INSPECTOR_PANEL_ID = `${EXTENSION_ID}.color-inspector`;
-var COMPONENT_PALETTE = Object.freeze([
-	"#3182f6",
-	"#10b981",
-	"#f59e0b",
-	"#8b5cf6",
-	"#ef4444",
-	"#06b6d4",
-	"#ec4899",
-	"#14b8a6",
-	"#f97316",
-	"#6366f1"
-]);
-function ensureHexForPicker(color, fallback = "#3182f6") {
-	return isValidHexColor(color) ? color.trim() : fallback;
-}
 function readSelectedChartEntity(world, selectedIds) {
 	if (!world || !Array.isArray(selectedIds)) return null;
 	for (const id of selectedIds) {
@@ -25632,109 +25648,6 @@ function readSelectedChartEntity(world, selectedIds) {
 		};
 	}
 	return null;
-}
-function controlRow(label, field, { wrap = false } = {}) {
-	return React.createElement("div", { className: "wb-control" }, React.createElement("div", {
-		className: "wb-control-row",
-		style: wrap ? {
-			flexWrap: "wrap",
-			height: "auto",
-			alignItems: "flex-start"
-		} : void 0
-	}, React.createElement("span", { className: "wb-control-label" }, label), React.createElement("div", {
-		className: "wb-control-field",
-		style: wrap ? {
-			flex: "1 1 100%",
-			justifyContent: "flex-start"
-		} : void 0
-	}, field)));
-}
-function textButton(label, onClick, pressed) {
-	return React.createElement("button", {
-		type: "button",
-		className: "wb-control-action",
-		"aria-pressed": pressed ? "true" : void 0,
-		onClick,
-		style: pressed ? {
-			background: "var(--alid-accent-soft, transparent)",
-			color: "var(--alid-accent, inherit)",
-			borderColor: "var(--alid-accent, currentColor)"
-		} : void 0
-	}, label);
-}
-function colorInput(label, value, fallback, onChange) {
-	return React.createElement("input", {
-		type: "color",
-		"aria-label": label,
-		value: ensureHexForPicker(value, fallback),
-		onChange: (event) => onChange(event.target.value)
-	});
-}
-function ChartColorAndHighlightControls({ selected, resolved, context }) {
-	if (!selected || !resolved) return null;
-	const dispatchStyleUpdate = (patchArgs) => {
-		const payload = {
-			entityId: selected.id,
-			...patchArgs
-		};
-		if (typeof context?.executeCommand === "function") context.executeCommand(`${EXTENSION_ID}:update-style`, payload);
-	};
-	const rawHighlight = resolved.highlight;
-	const activePreset = rawHighlight === void 0 || rawHighlight === null || rawHighlight === "auto" ? "auto" : typeof rawHighlight === "string" && [
-		"auto",
-		"max",
-		"min",
-		"first",
-		"last",
-		"none"
-	].includes(rawHighlight) ? rawHighlight : "custom";
-	const customHighlightSet = new Set(Array.isArray(rawHighlight) ? rawHighlight.map(String) : activePreset === "custom" && rawHighlight !== void 0 && rawHighlight !== null ? [String(rawHighlight)] : []);
-	const dataItems = resolved.dataTargets?.items ?? [];
-	const itemColors = resolved.itemColors ?? {};
-	const hasCustomItemColors = Object.keys(itemColors).length > 0;
-	const handleToggleHighlightItem = (itemKey) => {
-		const next = new Set(customHighlightSet);
-		if (next.has(itemKey)) next.delete(itemKey);
-		else next.add(itemKey);
-		const list = [...next];
-		dispatchStyleUpdate({ highlight: list.length === 0 ? "none" : list.length === 1 ? list[0] : list });
-	};
-	const handleAssignPalette = () => {
-		if (dataItems.length === 0) return;
-		const nextMap = {};
-		dataItems.forEach((item, idx) => {
-			nextMap[item.key] = COMPONENT_PALETTE[idx % COMPONENT_PALETTE.length];
-		});
-		dispatchStyleUpdate({
-			itemColors: nextMap,
-			replaceItemColors: true
-		});
-	};
-	const panelFallback = resolved.resolvedTheme?.panel || "#ffffff";
-	const accentFallback = resolved.resolvedTheme?.accent || "#3182f6";
-	const neutralFallback = resolved.resolvedTheme?.neutral || "#cbd5e1";
-	const showItems = dataItems.length > 0 && resolved.dataTargets?.kind !== "updown";
-	if (!showItems && dataItems.length === 0) return null;
-	return React.createElement("div", { className: "wb-controls" }, controlRow("배경", React.createElement(React.Fragment, null, resolved.backgroundColor !== "transparent" ? colorInput("배경 색상", resolved.backgroundColor, panelFallback, (value) => dispatchStyleUpdate({ backgroundColor: value })) : null, textButton("투명", () => dispatchStyleUpdate({ backgroundColor: "transparent" }), resolved.backgroundColor === "transparent"), resolved.backgroundColor ? textButton("기본값", () => dispatchStyleUpdate({ backgroundColor: "" })) : null)), showItems ? React.createElement(React.Fragment, null, controlRow("강조 항목", React.createElement("div", {
-		className: "wb-segmented",
-		role: "group",
-		"aria-label": "특정 데이터 항목 강조"
-	}, ...dataItems.map((item) => React.createElement("button", {
-		key: item.key,
-		type: "button",
-		"aria-pressed": customHighlightSet.has(item.key) ? "true" : "false",
-		onClick: () => handleToggleHighlightItem(item.key)
-	}, item.label))), { wrap: true }), activePreset === "custom" ? controlRow("직접 선택", textButton("자동으로", () => dispatchStyleUpdate({
-		highlight: "auto",
-		highlightMode: "auto"
-	}))) : null) : null, dataItems.length > 0 ? React.createElement(React.Fragment, null, controlRow("기본 데이터색", React.createElement(React.Fragment, null, colorInput("비강조 기본 데이터 색상", resolved.neutralColor, neutralFallback, (value) => dispatchStyleUpdate({ neutralColor: value })), resolved.neutralColor ? textButton("초기화", () => dispatchStyleUpdate({ neutralColor: "" })) : null)), controlRow("일괄", React.createElement(React.Fragment, null, textButton("팔레트 자동 배정", handleAssignPalette), hasCustomItemColors ? textButton("초기화", () => dispatchStyleUpdate({
-		itemColors: {},
-		replaceItemColors: true
-	})) : null)), ...dataItems.map((item, idx) => {
-		const customHex = itemColors[item.key];
-		const defaultFallback = item.key === "up" ? accentFallback : item.key === "down" ? resolved.resolvedTheme?.neutralStrong || "#64748b" : customHighlightSet.has(item.key) ? accentFallback : COMPONENT_PALETTE[idx % COMPONENT_PALETTE.length];
-		return controlRow(item.label, React.createElement(React.Fragment, null, colorInput(item.label, customHex, defaultFallback, (value) => dispatchStyleUpdate({ itemColors: { [item.key]: value } })), customHex ? textButton("해제", () => dispatchStyleUpdate({ itemColors: { [item.key]: "" } })) : null));
-	})) : null);
 }
 function ZtdChartStudioView({ context }) {
 	const [tick, setTick] = useState(0);
@@ -25937,11 +25850,7 @@ function ZtdChartStudioView({ context }) {
 			textOverflow: "ellipsis",
 			whiteSpace: "nowrap"
 		} }, item.type));
-	})), selected && resolved ? React.createElement(React.Fragment, null, React.createElement(ChartColorAndHighlightControls, {
-		selected,
-		resolved,
-		context
-	}), recommendations.length > 0 && React.createElement("div", { style: {
+	})), selected && resolved ? React.createElement(React.Fragment, null, recommendations.length > 0 && React.createElement("div", { style: {
 		display: "flex",
 		flexDirection: "column",
 		gap: "6px",
@@ -26066,56 +25975,6 @@ function ZtdChartStudioView({ context }) {
 			cursor: "pointer"
 		}
 	}, "샘플 복원")))) : null);
-}
-function ZtdChartColorInspectorView({ context }) {
-	const [tick, setTick] = useState(0);
-	useEffect(() => {
-		if (!context) return void 0;
-		const bump = () => setTick((v) => v + 1);
-		const offSel = context.onSelectionChange?.(bump);
-		const offWorld = context.onWorldMutated?.(bump);
-		return () => {
-			offSel?.();
-			offWorld?.();
-		};
-	}, [context]);
-	const selected = useMemo(() => {
-		const ids = context?.getSelectedIds?.() ?? [];
-		return readSelectedChartEntity(context?.world, ids);
-	}, [context, tick]);
-	const resolved = useMemo(() => selected ? resolveChartSpec(selected.props) : null, [selected]);
-	if (!selected || !resolved) return null;
-	return React.createElement(ChartColorAndHighlightControls, {
-		selected,
-		resolved,
-		context
-	});
-}
-function createColorInspectorPanelSpec() {
-	return {
-		panelId: COLOR_INSPECTOR_PANEL_ID,
-		title: "강조 데이터 및 세부 색상",
-		defaultZone: "right",
-		inspectorFor: CHART_ASPECT_ID,
-		isolation: "container",
-		mount(hostEl, context) {
-			if (!hostEl) return () => {};
-			const doc = hostEl.ownerDocument;
-			if (!doc || typeof doc.createElement !== "function") {
-				hostEl.textContent = "강조 데이터 및 세부 색상";
-				return () => {
-					hostEl.textContent = "";
-				};
-			}
-			const root = createRoot(hostEl);
-			root.render(React.createElement(ZtdChartColorInspectorView, { context }));
-			return () => {
-				try {
-					root.unmount();
-				} catch {}
-			};
-		}
-	};
 }
 function createStudioPanelSpec() {
 	return {
@@ -26831,6 +26690,34 @@ var ztdChartAspect = Object.freeze({
 				}))
 			},
 			{
+				id: "ztd-charts.background.transparent",
+				kind: "action",
+				label: "배경 투명",
+				commandSymbol: `${EXTENSION_ID}:update-style`,
+				params: { backgroundColor: "transparent" },
+				section: "강조 및 색상",
+				placement: "inspector",
+				requiresSelection: true
+			},
+			{
+				id: "ztd-charts.background.reset",
+				kind: "action",
+				label: "배경 기본값",
+				commandSymbol: `${EXTENSION_ID}:update-style`,
+				params: { backgroundColor: "" },
+				section: "강조 및 색상",
+				placement: "inspector",
+				requiresSelection: true
+			},
+			{
+				id: "ztd-charts.neutral.inspector",
+				kind: "color",
+				field: "neutralColor",
+				label: "기본 데이터색",
+				section: "세부 색상",
+				placement: "inspector"
+			},
+			{
 				id: "ztd-charts.suggest.inspector",
 				kind: "action",
 				label: "데이터 맞춤 추천 차트 적용",
@@ -26850,7 +26737,7 @@ var ztdChartAspect = Object.freeze({
 				requiresSelection: true
 			}
 		],
-		panels: [createColorInspectorPanelSpec(), createStudioPanelSpec()]
+		panels: [createStudioPanelSpec()]
 	}
 });
 function getActiveSurface(context) {
@@ -26897,6 +26784,37 @@ var plugin = {
 		const disposers = [];
 		const editor = mountInlineEditor(context);
 		disposers.push(() => editor.dispose());
+		const workbench = context.services?.get?.("ui.workbench");
+		let itemColorSignature = "";
+		let releaseItemColors = () => {};
+		const syncItemColorControls = () => {
+			const selectedId = getSelectedChartIds(context)[0];
+			const current = selectedId ? context.world.getCanonical(selectedId, CHART_ASPECT_ID) : null;
+			const slots = (current ? resolveChartSpec(current) : null)?.itemColorSlots ?? [];
+			const signature = slots.map((slot) => `${slot.slot}:${slot.label}`).join("|");
+			if (signature === itemColorSignature) return;
+			itemColorSignature = signature;
+			releaseItemColors();
+			releaseItemColors = () => {};
+			if (!slots.length || typeof workbench?.register !== "function") return;
+			releaseItemColors = workbench.register(`${EXTENSION_ID}.item-colors`, { controls: slots.map((slot) => ({
+				id: `ztd-charts.item-color.${slot.slot}`,
+				kind: "color",
+				aspectId: CHART_ASPECT_ID,
+				field: `itemColor${slot.slot}`,
+				label: slot.label,
+				section: "세부 색상",
+				placement: "inspector"
+			})) }, { aspectId: CHART_ASPECT_ID });
+		};
+		const offSurface = (context.services?.get?.("canvas.active-tool-surface"))?.subscribe?.(() => syncItemColorControls());
+		const offWorld = context.world?.subscribe?.(() => syncItemColorControls());
+		syncItemColorControls();
+		disposers.push(() => {
+			offSurface?.();
+			offWorld?.();
+			releaseItemColors();
+		});
 		const editChart = (rawArgs = {}) => {
 			const args = rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs) ? rawArgs : {};
 			const targetIds = getSelectedChartIds(context, args.entityId);
@@ -27075,13 +26993,17 @@ var plugin = {
 					optionsChanged = true;
 				}
 				if ("neutralColor" in args) {
-					if (!args.neutralColor) delete nextOptions.neutralColor;
-					else if (isValidHexColor(args.neutralColor)) nextOptions.neutralColor = args.neutralColor.trim();
+					const hex = isValidHexColor(args.neutralColor) ? args.neutralColor.trim() : "";
+					patch.neutralColor = hex;
+					if (hex) nextOptions.neutralColor = hex;
+					else delete nextOptions.neutralColor;
 					optionsChanged = true;
 				}
 				if ("itemColors" in args) {
-					if (!args.itemColors || typeof args.itemColors === "object" && Object.keys(args.itemColors).length === 0 && args.replaceItemColors) delete nextOptions.itemColors;
-					else if (typeof args.itemColors === "object" && !Array.isArray(args.itemColors)) {
+					if (!args.itemColors || typeof args.itemColors === "object" && Object.keys(args.itemColors).length === 0 && args.replaceItemColors) {
+						delete nextOptions.itemColors;
+						for (let slot = 0; slot < 8; slot += 1) patch[`itemColor${slot}`] = "";
+					} else if (typeof args.itemColors === "object" && !Array.isArray(args.itemColors)) {
 						const mergedColors = args.replaceItemColors ? {} : { ...nextOptions.itemColors ?? {} };
 						for (const [k, v] of Object.entries(args.itemColors)) {
 							const keyStr = String(k ?? "").trim();
@@ -27091,6 +27013,18 @@ var plugin = {
 						}
 						if (Object.keys(mergedColors).length > 0) nextOptions.itemColors = mergedColors;
 						else delete nextOptions.itemColors;
+						const resolvedNow = resolveChartSpec({
+							...current,
+							options: nextOptions
+						});
+						for (let slot = 0; slot < 8; slot += 1) {
+							const target = resolvedNow.dataTargets?.[slot];
+							if (!target) {
+								patch[`itemColor${slot}`] = "";
+								continue;
+							}
+							if (Object.prototype.hasOwnProperty.call(args.itemColors, target.key) || args.replaceItemColors) patch[`itemColor${slot}`] = isValidHexColor(mergedColors[target.key]) ? mergedColors[target.key] : "";
+						}
 					}
 					optionsChanged = true;
 				}
@@ -27243,4 +27177,4 @@ var plugin = {
 		};
 	}
 };
-export { CHART_ASPECT_ID, CHART_DEFAULTS, CHART_FAMILIES, CHART_TYPES, COLOR_INSPECTOR_PANEL_ID, COMMAND_NAMES, EXTENSION_ID, HIGHLIGHT_PRESETS, STUDIO_PANEL_ID, createPackageManifest, createSamplePropsForType, plugin as default, deriveChartGeometry, extractChartDataTargets, formatRowsAsCsv, getChartCatalog, matchTextToChartData, mergeDraft, mountInlineEditor, parseDataInput, planZtdChartChanges, registerZtdChartTools, renderChartDom, renderChartSvg, resolveChartSpec, resolveColorForZtdKey, sanitizeItemColors, settingsSchema, suggestChartsForRows, ztdChartAspect };
+export { CHART_ASPECT_ID, CHART_DEFAULTS, CHART_FAMILIES, CHART_TYPES, COMMAND_NAMES, EXTENSION_ID, HIGHLIGHT_PRESETS, STUDIO_PANEL_ID, createPackageManifest, createSamplePropsForType, plugin as default, deriveChartGeometry, extractChartDataTargets, formatRowsAsCsv, getChartCatalog, matchTextToChartData, mergeDraft, mountInlineEditor, parseDataInput, planZtdChartChanges, registerZtdChartTools, renderChartDom, renderChartSvg, resolveChartSpec, resolveColorForZtdKey, sanitizeItemColors, settingsSchema, suggestChartsForRows, ztdChartAspect };

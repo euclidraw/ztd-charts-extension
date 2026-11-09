@@ -13,6 +13,8 @@ export const DEFAULT_CHART_WIDTH = 480;
 export const DEFAULT_CHART_HEIGHT = 340;
 export const MIN_CHART_WIDTH = 240;
 export const MIN_CHART_HEIGHT = 180;
+/** Host inspector color rows. Data targets beyond this stay on the chart palette. */
+export const ITEM_COLOR_SLOT_COUNT = 8;
 
 export const CHART_FAMILIES = Object.freeze([
   { id: 'all', labelKo: '전체', labelEn: 'All' },
@@ -53,6 +55,15 @@ export const CHART_DEFAULTS = Object.freeze({
   accentColor: '#3182f6',
   backgroundColor: '',
   highlightMode: 'auto',
+  neutralColor: '',
+  itemColor0: '',
+  itemColor1: '',
+  itemColor2: '',
+  itemColor3: '',
+  itemColor4: '',
+  itemColor5: '',
+  itemColor6: '',
+  itemColor7: '',
   cornerRadius: 0,
   data: [],
   encoding: {},
@@ -789,16 +800,26 @@ export function resolveChartSpec(rawProps = {}) {
     : 'auto';
   if (highlightMode !== 'auto') customOptions.highlight = highlightMode;
   const textOverrides = isPlainRecord(customOptions.textOverrides) ? { ...customOptions.textOverrides } : {};
-  const itemColors = sanitizeItemColors(customOptions.itemColors);
+  const itemColors = { ...sanitizeItemColors(customOptions.itemColors) };
+  const neutralColor = isValidHexColor(rawProps.neutralColor)
+    ? rawProps.neutralColor.trim()
+    : isValidHexColor(customOptions.neutralColor)
+      ? customOptions.neutralColor.trim()
+      : '';
+  if (neutralColor) customOptions.neutralColor = neutralColor;
+  else delete customOptions.neutralColor;
+  // Host color rows write itemColor0..N before rows exist. Overlay them now so
+  // candlestick up/down, legend, and targets all see the same map.
+  const slotColors = [];
+  for (let slot = 0; slot < ITEM_COLOR_SLOT_COUNT; slot += 1) {
+    slotColors.push(isValidHexColor(rawProps[`itemColor${slot}`]) ? rawProps[`itemColor${slot}`].trim() : '');
+  }
 
   const backgroundColor = resolveBackgroundColor(rawProps.backgroundColor)
     || resolveBackgroundColor(customOptions.backgroundColor);
   // Theme tokens stay opaque. `transparent` only clears the card shell; inner marks
   // still stroke and halo with the theme panel color.
   const themeBackground = backgroundColor === 'transparent' ? '' : backgroundColor;
-  const neutralColor = isValidHexColor(customOptions.neutralColor)
-    ? customOptions.neutralColor.trim()
-    : '';
 
   const cornerRadius = resolveCornerRadius(rawProps.cornerRadius);
   const resolvedTheme = {
@@ -811,14 +832,6 @@ export function resolveChartSpec(rawProps = {}) {
   let effectiveOptions = { ...(example.options ?? {}), ...customOptions, locale: localeTag };
   if (customOptions.highlight === 'auto') {
     delete effectiveOptions.highlight;
-  }
-  if (chartType === 'candlestick') {
-    if (isValidHexColor(itemColors.up) && !isValidHexColor(effectiveOptions.upColor)) {
-      effectiveOptions.upColor = itemColors.up;
-    }
-    if (isValidHexColor(itemColors.down) && !isValidHexColor(effectiveOptions.downColor)) {
-      effectiveOptions.downColor = itemColors.down;
-    }
   }
   let usingSampleData = true;
 
@@ -849,6 +862,29 @@ export function resolveChartSpec(rawProps = {}) {
           usingSampleData = false;
         }
       }
+    }
+  }
+
+  const provisionalTargets = extractChartDataTargets(
+    chartType,
+    effectiveRows,
+    effectiveEncoding,
+    { ...effectiveOptions, ...customOptions, itemColors },
+    resolvedTheme,
+    localeTag,
+  );
+  provisionalTargets.slice(0, ITEM_COLOR_SLOT_COUNT).forEach((target, slot) => {
+    if (slotColors[slot]) itemColors[target.key] = slotColors[slot];
+  });
+  if (Object.keys(itemColors).length > 0) customOptions.itemColors = itemColors;
+  else delete customOptions.itemColors;
+  effectiveOptions = { ...effectiveOptions, ...customOptions };
+  if (chartType === 'candlestick') {
+    if (isValidHexColor(itemColors.up) && !isValidHexColor(effectiveOptions.upColor)) {
+      effectiveOptions.upColor = itemColors.up;
+    }
+    if (isValidHexColor(itemColors.down) && !isValidHexColor(effectiveOptions.downColor)) {
+      effectiveOptions.downColor = itemColors.down;
     }
   }
 
@@ -967,6 +1003,12 @@ export function resolveChartSpec(rawProps = {}) {
     backgroundColor,
     cornerRadius,
     neutralColor,
+    itemColorSlots: dataTargets.slice(0, ITEM_COLOR_SLOT_COUNT).map((target, slot) => ({
+      slot,
+      key: target.key,
+      label: target.label,
+      color: isValidHexColor(itemColors[target.key]) ? itemColors[target.key] : '',
+    })),
     highlightMode,
     highlight: customOptions.highlight ?? 'auto',
     itemColors,
