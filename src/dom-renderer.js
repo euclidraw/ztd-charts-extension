@@ -367,8 +367,9 @@ export function renderChartDom(hostEl, props, derived, entityId = 'chart') {
   const hasSubtitle = variant === 'card' && Boolean(resolved.subtitle);
   const hasLegend = variant === 'card' && legendItems.length > 0;
   const hasTakeaway = variant === 'card' && Boolean(resolved.takeaway);
+  const hasCardNumber = variant === 'card' && Boolean(cardNumber);
   const chromeHeight = variant === 'card'
-    ? 68 + (hasSubtitle ? 20 : 0) + (hasLegend ? 24 : 0) + (hasTakeaway ? 34 : 0)
+    ? (hasCardNumber ? 68 : 48) + (hasSubtitle ? 20 : 0) + (hasLegend ? 24 : 0) + (hasTakeaway ? 34 : 0)
     : 24;
   const plotHeight = Math.max(96, height - chromeHeight);
   const plotWidth = Math.max(140, width - (variant === 'card' ? 40 : 24));

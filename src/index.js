@@ -378,7 +378,7 @@ const plugin = {
           const sample = createSamplePropsForType(nextType, current.locale, current.theme);
           patch.title = sample.title;
           patch.subtitle = sample.subtitle;
-          patch.takeaway = sample.takeaway;
+          patch.takeaway = '';
         }
         ops.push({ id, aspect: CHART_ASPECT_ID, patch });
       }
@@ -534,7 +534,7 @@ const plugin = {
           patch: {
             title: sample.title,
             subtitle: sample.subtitle,
-            takeaway: sample.takeaway,
+            takeaway: '',
             data: [],
             encoding: {},
             options: {},

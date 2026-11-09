@@ -23557,9 +23557,9 @@ function resolveChartSpec(rawProps = {}) {
 	const finalTheme = singleTargetCustomColor ? resolveChartTheme(themeName, singleTargetCustomColor, backgroundColor, neutralColor) : resolvedTheme;
 	const title = textOverrides["field:title"] !== void 0 ? String(textOverrides["field:title"]) : typeof rawProps.title === "string" && rawProps.title.length > 0 ? rawProps.title : example.card?.title ?? def.name ?? chartType;
 	const subtitle = textOverrides["field:subtitle"] !== void 0 ? String(textOverrides["field:subtitle"]) : typeof rawProps.subtitle === "string" && rawProps.subtitle.length > 0 ? rawProps.subtitle : example.card?.subtitle ?? "";
-	const takeaway = textOverrides["field:takeaway"] !== void 0 ? String(textOverrides["field:takeaway"]) : typeof rawProps.takeaway === "string" && rawProps.takeaway.length > 0 ? rawProps.takeaway : usingSampleData ? example.card?.takeaway ?? "" : "";
-	const cardNumber = textOverrides["field:cardNumber"] !== void 0 ? String(textOverrides["field:cardNumber"]) : customOptions.cardNumber !== void 0 ? String(customOptions.cardNumber) : example.card?.number !== void 0 ? String(example.card.number) : "";
-	const cardLevel = textOverrides["field:cardLevel"] !== void 0 ? String(textOverrides["field:cardLevel"]) : customOptions.cardLevel !== void 0 ? String(customOptions.cardLevel) : example.card?.level !== void 0 ? String(example.card.level) : "";
+	const takeaway = textOverrides["field:takeaway"] !== void 0 ? String(textOverrides["field:takeaway"]) : typeof rawProps.takeaway === "string" ? rawProps.takeaway : "";
+	const cardNumber = textOverrides["field:cardNumber"] !== void 0 ? String(textOverrides["field:cardNumber"]) : customOptions.cardNumber !== void 0 ? String(customOptions.cardNumber) : "";
+	const cardLevel = textOverrides["field:cardLevel"] !== void 0 ? String(textOverrides["field:cardLevel"]) : customOptions.cardLevel !== void 0 ? String(customOptions.cardLevel) : "";
 	const baseSpecForLegend = {
 		type: chartType,
 		data: effectiveRows,
@@ -23585,12 +23585,11 @@ function resolveChartSpec(rawProps = {}) {
 	const hasLegendOverrides = legendItems.some((item, idx) => textOverrides[`legend:${idx}`] !== void 0 || textOverrides[`text:${item?.label}`] !== void 0 || isValidHexColor(item?.color));
 	const cardLegend = legendMode === "false" ? false : hasLegendOverrides && legendItems.length > 0 ? legendItems : "auto";
 	const card = variant === "card" ? {
-		...example.card ?? {},
-		number: cardNumber || void 0,
 		title,
 		subtitle: subtitle || void 0,
-		takeaway: takeaway || void 0,
-		level: cardLevel ? example.card?.level ?? "기본" : void 0,
+		...cardNumber ? { number: cardNumber } : {},
+		...takeaway ? { takeaway } : {},
+		...cardLevel ? { level: cardLevel } : {},
 		legend: cardLegend,
 		replay: false
 	} : void 0;
@@ -23767,7 +23766,7 @@ function createSamplePropsForType(chartType = "bar", locale = "ko", theme = "lig
 		theme: theme === "dark" ? "dark" : "light",
 		title: ex.card?.title ?? def.name ?? safeType,
 		subtitle: ex.card?.subtitle ?? "",
-		takeaway: ex.card?.takeaway ?? "",
+		takeaway: "",
 		data: [],
 		encoding: {},
 		options: {}
@@ -24352,7 +24351,7 @@ function renderChartDom(hostEl, props, derived, entityId = "chart") {
 	const hasSubtitle = variant === "card" && Boolean(resolved.subtitle);
 	const hasLegend = variant === "card" && legendItems.length > 0;
 	const hasTakeaway = variant === "card" && Boolean(resolved.takeaway);
-	const plotHeight = Math.max(96, height - (variant === "card" ? 68 + (hasSubtitle ? 20 : 0) + (hasLegend ? 24 : 0) + (hasTakeaway ? 34 : 0) : 24));
+	const plotHeight = Math.max(96, height - (variant === "card" ? (variant === "card" && Boolean(cardNumber) ? 68 : 48) + (hasSubtitle ? 20 : 0) + (hasLegend ? 24 : 0) + (hasTakeaway ? 34 : 0) : 24));
 	const plotWidth = Math.max(140, width - (variant === "card" ? 40 : 24));
 	const activeSpec = variant === "card" ? spec : bareSpec;
 	const element = React.createElement(ThemeProvider, { theme: resolvedTheme }, React.createElement(ChartIslandContent, {
@@ -27149,7 +27148,7 @@ var plugin = {
 					const sample = createSamplePropsForType(nextType, current.locale, current.theme);
 					patch.title = sample.title;
 					patch.subtitle = sample.subtitle;
-					patch.takeaway = sample.takeaway;
+					patch.takeaway = "";
 				}
 				ops.push({
 					id,
@@ -27266,7 +27265,7 @@ var plugin = {
 					patch: {
 						title: sample.title,
 						subtitle: sample.subtitle,
-						takeaway: sample.takeaway,
+						takeaway: "",
 						data: [],
 						encoding: {},
 						options: {}

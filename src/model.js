@@ -855,21 +855,23 @@ export function resolveChartSpec(rawProps = {}) {
     : typeof rawProps.subtitle === 'string' && rawProps.subtitle.length > 0
       ? rawProps.subtitle
       : (example.card?.subtitle ?? '');
+  // Card chrome is title and subtitle only. Sample cards ship a catalog number,
+  // difficulty level, and takeaway; none of those are shown unless the user set them.
   const takeaway = textOverrides['field:takeaway'] !== undefined
     ? String(textOverrides['field:takeaway'])
-    : typeof rawProps.takeaway === 'string' && rawProps.takeaway.length > 0
+    : typeof rawProps.takeaway === 'string'
       ? rawProps.takeaway
-      : (usingSampleData ? (example.card?.takeaway ?? '') : '');
+      : '';
   const cardNumber = textOverrides['field:cardNumber'] !== undefined
     ? String(textOverrides['field:cardNumber'])
     : customOptions.cardNumber !== undefined
       ? String(customOptions.cardNumber)
-      : (example.card?.number !== undefined ? String(example.card.number) : '');
+      : '';
   const cardLevel = textOverrides['field:cardLevel'] !== undefined
     ? String(textOverrides['field:cardLevel'])
     : customOptions.cardLevel !== undefined
       ? String(customOptions.cardLevel)
-      : (example.card?.level !== undefined ? String(example.card.level) : '');
+      : '';
 
   const baseSpecForLegend = {
     type: chartType,
@@ -913,12 +915,11 @@ export function resolveChartSpec(rawProps = {}) {
 
   const card = variant === 'card'
     ? {
-        ...(example.card ?? {}),
-        number: cardNumber || undefined,
         title,
         subtitle: subtitle || undefined,
-        takeaway: takeaway || undefined,
-        level: cardLevel ? (example.card?.level ?? '기본') : undefined,
+        ...(cardNumber ? { number: cardNumber } : {}),
+        ...(takeaway ? { takeaway } : {}),
+        ...(cardLevel ? { level: cardLevel } : {}),
         legend: cardLegend,
         replay: false,
       }
@@ -1088,7 +1089,7 @@ export function createSamplePropsForType(chartType = 'bar', locale = 'ko', theme
     theme: theme === 'dark' ? 'dark' : 'light',
     title: ex.card?.title ?? def.name ?? safeType,
     subtitle: ex.card?.subtitle ?? '',
-    takeaway: ex.card?.takeaway ?? '',
+    takeaway: '',
     data: [],
     encoding: {},
     options: {},

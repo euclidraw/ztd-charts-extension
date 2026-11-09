@@ -524,6 +524,31 @@ test('inline editor supports double-click and Enter editing for title, subtitle,
   }
 });
 
+test('card chrome keeps only the title and subtitle unless the user sets the rest', () => {
+  const resolved = resolveChartSpec({ chartType: 'bar', locale: 'ko' });
+  assert.equal(resolved.cardNumber, '');
+  assert.equal(resolved.cardLevel, '');
+  assert.equal(resolved.takeaway, '');
+  assert.equal(resolved.spec.card.number, undefined);
+  assert.equal(resolved.spec.card.level, undefined);
+  assert.equal(resolved.spec.card.takeaway, undefined);
+  assert.ok(resolved.spec.card.title);
+  assert.ok(resolved.spec.card.subtitle);
+
+  const { svg } = renderChartSvg({ chartType: 'bar', locale: 'ko' }, undefined, 'card-chrome');
+  assert.equal(svg.includes('data-chart-field="takeaway"'), false);
+
+  const kept = resolveChartSpec({
+    chartType: 'bar',
+    locale: 'ko',
+    takeaway: '직접 적은 요약',
+    options: { cardNumber: '03', cardLevel: '심화' },
+  });
+  assert.equal(kept.takeaway, '직접 적은 요약');
+  assert.equal(kept.cardNumber, '03');
+  assert.equal(kept.cardLevel, '심화');
+});
+
 test('custom backgroundColor, highlight selection, neutralColor, and per-component itemColors work across SVG, DOM, commands, and Copilot tools', () => {
   const rows = [
     { channel: '검색', conversion: 42 },
