@@ -35,6 +35,7 @@ export async function createInstallManifest(outDir = new URL('dist/', root)) {
         'canvas.creation',
         'canvas.active-tool-surface',
         'canvas.frames',
+        'canvas.text-history',
         'extensions.preferences',
         'workspace.tools',
       ],

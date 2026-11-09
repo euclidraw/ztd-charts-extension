@@ -6,6 +6,7 @@ export const STUDIO_PANEL_ID = `${EXTENSION_ID}.studio`;
 
 export const COMMAND_NAMES = Object.freeze([
   'insert-chart',
+  'edit-chart',
   'set-chart-type',
   'update-data',
   'reset-sample-data',

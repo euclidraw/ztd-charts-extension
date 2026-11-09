@@ -13,13 +13,64 @@ function ensureDocumentBaseCss(doc) {
     if (!doc.getElementById?.('ztd-charts-extension-css')) {
       const style = doc.createElement('style');
       style.id = 'ztd-charts-extension-css';
-      style.textContent = `${baseCss}\n[data-role="ztd-chart-mount"] .ztd-card { height: 100%; box-sizing: border-box; margin: 0; }`;
+      style.textContent = [
+        baseCss,
+        '[data-role="ztd-chart-mount"] .ztd-card { height: 100%; box-sizing: border-box; margin: 0; }',
+        '[data-role="ztd-chart-mount"] [data-chart-field], [data-role="ztd-chart-mount"] svg text { cursor: text; }',
+      ].join('\n');
       (doc.head ?? doc.documentElement)?.appendChild?.(style);
     }
     injectedDocs.add(doc);
   } catch {
     // Ignore read-only or synthetic documents
   }
+}
+
+function ChartIslandContent({ activeSpec, variant, plotWidth, plotHeight, localeTag }) {
+  const wrapRef = React.useRef(null);
+
+  React.useLayoutEffect(() => {
+    const root = wrapRef.current;
+    if (!root || typeof root.querySelector !== 'function') return;
+    const titleEl = root.querySelector('.ztd-card > header h1, .ztd-card > header h2, .ztd-card > header h3');
+    if (titleEl) {
+      titleEl.dataset.chartField = 'title';
+      titleEl.title = '더블클릭하여 제목 편집';
+    }
+    const headerRows = root.querySelectorAll('.ztd-card > header > div');
+    const subtitleEl = headerRows?.[1]?.querySelector?.('span:first-child');
+    if (subtitleEl && activeSpec?.card?.subtitle) {
+      subtitleEl.dataset.chartField = 'subtitle';
+      subtitleEl.title = '더블클릭하여 부제목 편집';
+    }
+    const takeawayEl = root.querySelector('.ztd-card > footer > span:first-child');
+    if (takeawayEl && activeSpec?.card?.takeaway) {
+      takeawayEl.dataset.chartField = 'takeaway';
+      takeawayEl.title = '더블클릭하여 핵심 요약 편집';
+    }
+  });
+
+  return React.createElement(
+    'div',
+    {
+      ref: wrapRef,
+      style: {
+        width: '100%',
+        height: '100%',
+        boxSizing: 'border-box',
+        padding: variant === 'card' ? '0px' : '12px',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+      },
+    },
+    React.createElement(Chart, {
+      spec: activeSpec,
+      width: plotWidth,
+      height: plotHeight,
+      locale: localeTag,
+    }),
+  );
 }
 
 /**
@@ -93,26 +144,13 @@ export function renderChartDom(hostEl, props, derived, entityId = 'chart') {
   const element = React.createElement(
     ThemeProvider,
     { theme: resolvedTheme },
-    React.createElement(
-      'div',
-      {
-        style: {
-          width: '100%',
-          height: '100%',
-          boxSizing: 'border-box',
-          padding: variant === 'card' ? '0px' : '12px',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-        },
-      },
-      React.createElement(Chart, {
-        spec: activeSpec,
-        width: plotWidth,
-        height: plotHeight,
-        locale: localeTag,
-      }),
-    ),
+    React.createElement(ChartIslandContent, {
+      activeSpec,
+      variant,
+      plotWidth,
+      plotHeight,
+      localeTag,
+    }),
   );
 
   const renderGen = ++entry.gen;

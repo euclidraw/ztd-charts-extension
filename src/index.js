@@ -1,5 +1,6 @@
 import metadata from '../extension.json' with { type: 'json' };
 import { renderChartDom } from './dom-renderer.js';
+import { matchTextToChartData, mergeDraft, mountInlineEditor } from './inline-editor.js';
 import {
   CHART_ASPECT_ID,
   COMMAND_NAMES,
@@ -38,8 +39,16 @@ const CHART_ICON = Object.freeze({
   ]),
 });
 
+const EDIT_ICON = Object.freeze({
+  paths: Object.freeze([
+    'M4 14 14 4l3 3L7 17H4z',
+    'M12 6l3 3',
+  ]),
+});
+
 const COMMAND_LABELS = Object.freeze({
   'insert-chart': 'ZTD 차트 추가',
+  'edit-chart': '차트 텍스트 인라인 편집',
   'set-chart-type': '차트 종류 변경',
   'update-data': '차트 데이터 업데이트',
   'reset-sample-data': '샘플 데이터 복원',
@@ -90,6 +99,15 @@ export const ztdChartAspect = Object.freeze({
           { label: '라이트', value: 'light' },
           { label: '다크', value: 'dark' },
         ],
+      },
+      {
+        id: 'ztd-charts.edit.selection',
+        kind: 'action',
+        label: '텍스트 편집',
+        icon: EDIT_ICON,
+        commandSymbol: `${EXTENSION_ID}:edit-chart`,
+        placement: 'selection-bar',
+        requiresSelection: true,
       },
       {
         id: 'ztd-charts.suggest.selection',
@@ -267,6 +285,17 @@ const plugin = {
   },
   activate(context) {
     const disposers = [];
+    const editor = mountInlineEditor(context);
+    disposers.push(() => editor.dispose());
+
+    const editChart = (rawArgs = {}) => {
+      const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
+      const targetIds = getSelectedChartIds(context, args.entityId);
+      if (targetIds.length === 0) return null;
+      const field = typeof args.field === 'string' && args.field ? args.field : 'title';
+      editor.open(targetIds[0], field);
+      return targetIds[0];
+    };
 
     const insertChart = (rawArgs = {}) => {
       const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
@@ -473,6 +502,8 @@ const plugin = {
       switch (name) {
         case 'insert-chart':
           return insertChart(args);
+        case 'edit-chart':
+          return editChart(args);
         case 'set-chart-type':
           return setChartType(args);
         case 'update-data':
@@ -503,6 +534,12 @@ const plugin = {
           title: COMMAND_LABELS[name] ?? name,
           summary: COMMAND_LABELS[name] ?? name,
           shortcutScope: 'canvas',
+          ...(name === 'edit-chart'
+            ? {
+                shortcutSelectionAspect: CHART_ASPECT_ID,
+                keys: ['Enter'],
+              }
+            : {}),
           run: args => runCommand(name, args),
         });
         if (typeof off === 'function') disposers.push(off);
@@ -522,10 +559,12 @@ const plugin = {
       api: Object.freeze({
         run: runCommand,
         insertChart,
+        editChart,
         setChartType,
         updateData,
         resetSampleData,
         applyTopSuggestion,
+        editor,
       }),
       dispose() {
         for (const dispose of disposers.splice(0).reverse()) {
@@ -554,6 +593,9 @@ export {
   deriveChartGeometry,
   formatRowsAsCsv,
   getChartCatalog,
+  matchTextToChartData,
+  mergeDraft,
+  mountInlineEditor,
   parseDataInput,
   planZtdChartChanges,
   registerZtdChartTools,

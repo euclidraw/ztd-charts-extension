@@ -339,10 +339,10 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
   let headerSvg = '';
   if (variant === 'card') {
     let cursorY = padTop + 15;
-    headerSvg += `<text x="${padX}" y="${cursorY}" font-size="15" font-weight="700" fill="${escapeXml(resolvedTheme.ink)}">${escapeXml(title)}</text>`;
+    headerSvg += `<text data-chart-field="title" x="${padX}" y="${cursorY}" font-size="15" font-weight="700" fill="${escapeXml(resolvedTheme.ink)}">${escapeXml(title)}</text>`;
     if (hasSubtitle) {
       cursorY += 18;
-      headerSvg += `<text x="${padX}" y="${cursorY}" font-size="11.5" font-weight="400" fill="${escapeXml(resolvedTheme.muted)}">${escapeXml(subtitle)}</text>`;
+      headerSvg += `<text data-chart-field="subtitle" x="${padX}" y="${cursorY}" font-size="11.5" font-weight="400" fill="${escapeXml(resolvedTheme.muted)}">${escapeXml(subtitle)}</text>`;
     }
     if (hasLegend) {
       cursorY += 10;
@@ -356,7 +356,7 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
     const textY = height - padBottom - 4;
     footerSvg =
       `<line x1="${padX}" y1="${lineY}" x2="${width - padX}" y2="${lineY}" stroke="${escapeXml(resolvedTheme.line)}" stroke-width="1"/>` +
-      `<text x="${padX}" y="${textY}" font-size="11.5" font-weight="600" fill="${escapeXml(resolvedTheme.accentText)}">${escapeXml(takeaway)}</text>`;
+      `<text data-chart-field="takeaway" x="${padX}" y="${textY}" font-size="11.5" font-weight="600" fill="${escapeXml(resolvedTheme.accentText)}">${escapeXml(takeaway)}</text>`;
   }
 
   const fontFamily = escapeXml(resolvedTheme.fontFamily || 'Pretendard, -apple-system, BlinkMacSystemFont, sans-serif');
