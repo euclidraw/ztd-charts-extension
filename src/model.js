@@ -71,6 +71,14 @@ export function isValidHexColor(value) {
   return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim());
 }
 
+/** Stored card background: a hex color, `transparent`, or '' for the theme panel. */
+export function resolveBackgroundColor(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (trimmed.toLowerCase() === 'transparent') return 'transparent';
+  return isValidHexColor(trimmed) ? trimmed : '';
+}
+
 /** Card corner radius in pixels. Square by default; capped so a card cannot become a circle. */
 export function resolveCornerRadius(value) {
   const n = typeof value === 'number' ? value : Number(value);
@@ -778,18 +786,18 @@ export function resolveChartSpec(rawProps = {}) {
   const textOverrides = isPlainRecord(customOptions.textOverrides) ? { ...customOptions.textOverrides } : {};
   const itemColors = sanitizeItemColors(customOptions.itemColors);
 
-  const backgroundColor = isValidHexColor(rawProps.backgroundColor)
-    ? rawProps.backgroundColor.trim()
-    : isValidHexColor(customOptions.backgroundColor)
-      ? customOptions.backgroundColor.trim()
-      : '';
+  const backgroundColor = resolveBackgroundColor(rawProps.backgroundColor)
+    || resolveBackgroundColor(customOptions.backgroundColor);
+  // Theme tokens stay opaque. `transparent` only clears the card shell; inner marks
+  // still stroke and halo with the theme panel color.
+  const themeBackground = backgroundColor === 'transparent' ? '' : backgroundColor;
   const neutralColor = isValidHexColor(customOptions.neutralColor)
     ? customOptions.neutralColor.trim()
     : '';
 
   const cornerRadius = resolveCornerRadius(rawProps.cornerRadius);
   const resolvedTheme = {
-    ...resolveChartTheme(themeName, accentColor, backgroundColor, neutralColor),
+    ...resolveChartTheme(themeName, accentColor, themeBackground, neutralColor),
     radius: cornerRadius,
   };
 
@@ -854,7 +862,7 @@ export function resolveChartSpec(rawProps = {}) {
       ? dataTargets[0].customColor
       : '';
   const finalTheme = singleTargetCustomColor
-    ? { ...resolveChartTheme(themeName, singleTargetCustomColor, backgroundColor, neutralColor), radius: cornerRadius }
+    ? { ...resolveChartTheme(themeName, singleTargetCustomColor, themeBackground, neutralColor), radius: cornerRadius }
     : resolvedTheme;
 
   const title = textOverrides['field:title'] !== undefined

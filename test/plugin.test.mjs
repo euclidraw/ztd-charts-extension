@@ -744,5 +744,46 @@ test('custom backgroundColor, highlight selection, neutralColor, and per-compone
   runtime.dispose();
 });
 
+test('transparent background clears only the card shell and keeps theme ink and panel tokens', () => {
+  const light = resolveChartSpec({ chartType: 'bar', theme: 'light', backgroundColor: 'transparent' });
+  assert.equal(light.backgroundColor, 'transparent');
+  assert.equal(light.resolvedTheme.panel, '#FFFFFF');
+  assert.equal(light.resolvedTheme.ink, '#14171B');
+
+  const dark = resolveChartSpec({ chartType: 'bar', theme: 'dark', backgroundColor: ' Transparent ' });
+  assert.equal(dark.backgroundColor, 'transparent');
+  assert.equal(dark.resolvedTheme.panel, '#14171B');
+  assert.equal(dark.resolvedTheme.ink, '#F1F3F5');
+
+  const { svg } = renderChartSvg({ chartType: 'bar', backgroundColor: 'transparent' }, undefined, 'clear-card');
+  const cardRect = svg.match(/<rect data-chart-card="background"[^>]*>/)?.[0] ?? '';
+  assert.match(cardRect, /fill="none"/);
+  assert.match(cardRect, /stroke="none"/);
+  assert.equal(cardRect.includes('#FFFFFF'), false);
+
+  const world = createMockWorld();
+  const planned = planZtdChartChanges(world, [
+    { action: 'create', id: 'c1', patch: { chartType: 'bar', backgroundColor: 'transparent' } },
+  ]);
+  assert.equal(planned.find(op => op.aspect === CHART_ASPECT_ID).patch.backgroundColor, 'transparent');
+  assert.throws(
+    () => planZtdChartChanges(world, [{ action: 'create', id: 'c2', patch: { backgroundColor: 'clear' } }]),
+    /backgroundColor/,
+  );
+
+  const runtime = plugin.activate({
+    world,
+    commands: { register: () => () => {} },
+    services: { get: () => undefined },
+  });
+  const chartId = runtime.api.insertChart({ chartType: 'bar', backgroundColor: 'transparent' });
+  assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).backgroundColor, 'transparent');
+  runtime.api.run('update-style', { entityId: chartId, backgroundColor: 'transparent' });
+  assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).backgroundColor, 'transparent');
+  runtime.api.run('update-style', { entityId: chartId, backgroundColor: '' });
+  assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).backgroundColor, '');
+  runtime.dispose();
+});
+
 
 

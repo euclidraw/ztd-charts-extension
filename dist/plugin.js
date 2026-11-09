@@ -4,7 +4,7 @@ import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 var extension_default = {
 	id: "diagram.ztd-charts",
 	title: "ZTD 차트",
-	version: "0.1.5",
+	version: "0.1.6",
 	summary: "36종의 zero-dependency 통계·비즈니스 차트를 캔버스 도형, 정적 SVG, 데이터 스튜디오 패널 및 코파일럿 도구로 제공하는 확장",
 	engine: "^0.1.1",
 	dependencies: {},
@@ -22905,6 +22905,13 @@ var HIGHLIGHT_PRESETS = Object.freeze([
 function isValidHexColor(value) {
 	return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value.trim());
 }
+/** Stored card background: a hex color, `transparent`, or '' for the theme panel. */
+function resolveBackgroundColor(value) {
+	if (typeof value !== "string") return "";
+	const trimmed = value.trim();
+	if (trimmed.toLowerCase() === "transparent") return "transparent";
+	return isValidHexColor(trimmed) ? trimmed : "";
+}
 /** Card corner radius in pixels. Square by default; capped so a card cannot become a circle. */
 function resolveCornerRadius(value) {
 	const n = typeof value === "number" ? value : Number(value);
@@ -23516,11 +23523,12 @@ function resolveChartSpec(rawProps = {}) {
 	const customOptions = isPlainRecord$1(rawProps.options) ? { ...rawProps.options } : {};
 	const textOverrides = isPlainRecord$1(customOptions.textOverrides) ? { ...customOptions.textOverrides } : {};
 	const itemColors = sanitizeItemColors(customOptions.itemColors);
-	const backgroundColor = isValidHexColor(rawProps.backgroundColor) ? rawProps.backgroundColor.trim() : isValidHexColor(customOptions.backgroundColor) ? customOptions.backgroundColor.trim() : "";
+	const backgroundColor = resolveBackgroundColor(rawProps.backgroundColor) || resolveBackgroundColor(customOptions.backgroundColor);
+	const themeBackground = backgroundColor === "transparent" ? "" : backgroundColor;
 	const neutralColor = isValidHexColor(customOptions.neutralColor) ? customOptions.neutralColor.trim() : "";
 	const cornerRadius = resolveCornerRadius(rawProps.cornerRadius);
 	const resolvedTheme = {
-		...resolveChartTheme(themeName, accentColor, backgroundColor, neutralColor),
+		...resolveChartTheme(themeName, accentColor, themeBackground, neutralColor),
 		radius: cornerRadius
 	};
 	let effectiveRows = example.data;
@@ -23566,7 +23574,7 @@ function resolveChartSpec(rawProps = {}) {
 	const dataTargets = extractChartDataTargets(chartType, effectiveRows, effectiveEncoding, effectiveOptions, resolvedTheme, localeTag);
 	const singleTargetCustomColor = (chartType === "gauge" || chartType === "sparkline") && dataTargets[0]?.customColor ? dataTargets[0].customColor : "";
 	const finalTheme = singleTargetCustomColor ? {
-		...resolveChartTheme(themeName, singleTargetCustomColor, backgroundColor, neutralColor),
+		...resolveChartTheme(themeName, singleTargetCustomColor, themeBackground, neutralColor),
 		radius: cornerRadius
 	} : resolvedTheme;
 	const title = textOverrides["field:title"] !== void 0 ? String(textOverrides["field:title"]) : typeof rawProps.title === "string" && rawProps.title.length > 0 ? rawProps.title : example.card?.title ?? def.name ?? chartType;
@@ -24047,6 +24055,8 @@ function renderChartSvg(props, derived, entityId = "chart") {
 	const rotationDeg = Number.isFinite(geom.rotation) ? geom.rotation * 180 / Math.PI : 0;
 	const resolved = resolveChartSpec(props);
 	const { bareSpec, resolvedTheme, localeTag, variant, title, subtitle, takeaway, textOverrides, legendItems, cornerRadius } = resolved;
+	const cardFill = resolved.backgroundColor === "transparent" ? "none" : resolved.backgroundColor || resolvedTheme.panel;
+	const cardStroke = resolved.backgroundColor === "transparent" ? "none" : resolvedTheme.line;
 	const padX = variant === "card" ? 20 : 12;
 	const padTop = variant === "card" ? 18 : 12;
 	const padBottom = variant === "card" ? 16 : 12;
@@ -24097,7 +24107,7 @@ function renderChartSvg(props, derived, entityId = "chart") {
 		footerSvg = `<line x1="${padX}" y1="${lineY}" x2="${width - padX}" y2="${lineY}" stroke="${escapeXml(resolvedTheme.line)}" stroke-width="1"/><text data-chart-field="takeaway" x="${padX}" y="${textY}" font-size="11.5" font-weight="600" fill="${escapeXml(resolvedTheme.accentText)}">${escapeXml(takeaway)}</text>`;
 	}
 	const fontFamily = escapeXml(resolvedTheme.fontFamily || "Pretendard, -apple-system, BlinkMacSystemFont, sans-serif");
-	return { svg: `<g transform="${transformAttr}" data-chart-type="${escapeXml(resolved.chartType)}" font-family="${fontFamily}"><defs><clipPath id="${clipId}"><rect width="${width}" height="${height}" rx="${cornerRadius}"/></clipPath></defs><g clip-path="url(#${clipId})"><rect width="${width}" height="${height}" rx="${cornerRadius}" fill="${escapeXml(resolvedTheme.panel)}" stroke="${escapeXml(resolvedTheme.line)}" stroke-width="1"/>` + headerSvg + `<svg x="${plotX}" y="${plotY}" width="${plotWidth}" height="${plotHeight}" viewBox="${escapeXml(viewBox)}" preserveAspectRatio="xMidYMid meet">` + innerPlotSvg + `</svg>` + footerSvg + "</g></g>" };
+	return { svg: `<g transform="${transformAttr}" data-chart-type="${escapeXml(resolved.chartType)}" font-family="${fontFamily}"><defs><clipPath id="${clipId}"><rect width="${width}" height="${height}" rx="${cornerRadius}"/></clipPath></defs><g clip-path="url(#${clipId})"><rect data-chart-card="background" width="${width}" height="${height}" rx="${cornerRadius}" fill="${escapeXml(cardFill)}" stroke="${escapeXml(cardStroke)}" stroke-width="1"/>` + headerSvg + `<svg x="${plotX}" y="${plotY}" width="${plotWidth}" height="${plotHeight}" viewBox="${escapeXml(viewBox)}" preserveAspectRatio="xMidYMid meet">` + innerPlotSvg + `</svg>` + footerSvg + "</g></g>" };
 }
 // src/dom-renderer.js
 var mountedRoots = /* @__PURE__ */ new WeakMap();
@@ -24118,6 +24128,7 @@ function ensureDocumentBaseCss(doc) {
 			style.textContent = [
 				baseCss,
 				"[data-role=\"ztd-chart-mount\"] .ztd-card { height: 100%; box-sizing: border-box; margin: 0; }",
+				"[data-ztd-card-background=\"transparent\"] .ztd-card { background: transparent !important; border-color: transparent !important; box-shadow: none !important; }",
 				"[data-role=\"ztd-chart-mount\"] [data-chart-field], [data-role=\"ztd-chart-mount\"] [data-chart-option-field] { pointer-events: auto !important; cursor: text !important; }",
 				"input[data-ztd-chart-editor=\"true\"], input[data-ztd-chart-editor=\"true\"]:focus, input[data-ztd-chart-editor=\"true\"]:focus-visible { background: transparent !important; border: none !important; outline: none !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; }"
 			].join("\n");
@@ -24335,7 +24346,12 @@ function renderChartDom(hostEl, props, derived, entityId = "chart") {
 		hostEl.dataset.chartBackground = resolved.backgroundColor || "";
 	}
 	const themeVars = themeToCss(resolvedTheme);
-	if (hostEl.style) hostEl.style.cssText = `${themeVars};width:100%;height:${height}px;box-sizing:border-box;position:relative;overflow:hidden;border-radius:${resolved.cornerRadius}px;background:${resolvedTheme.panel};border:1px solid ${resolvedTheme.line};color:${resolvedTheme.ink};font-family:${resolvedTheme.fontFamily};user-select:none;`;
+	const transparentCard = resolved.backgroundColor === "transparent";
+	if (hostEl.dataset) {
+		if (transparentCard) hostEl.dataset.ztdCardBackground = "transparent";
+		else delete hostEl.dataset.ztdCardBackground;
+	}
+	if (hostEl.style) hostEl.style.cssText = `${themeVars};width:100%;height:${height}px;box-sizing:border-box;position:relative;overflow:hidden;border-radius:${resolved.cornerRadius}px;background:${transparentCard ? "transparent" : resolved.backgroundColor || resolvedTheme.panel};border:1px solid ${transparentCard ? "transparent" : resolvedTheme.line};color:${resolvedTheme.ink};font-family:${resolvedTheme.fontFamily};user-select:none;`;
 	const doc = hostEl.ownerDocument;
 	if (!doc || typeof doc.createElement !== "function") {
 		const { svg } = renderChartSvg(props, {
@@ -25656,6 +25672,53 @@ function readSelectedChartEntity(world, selectedIds) {
 	}
 	return null;
 }
+function controlRow(label, field, { wrap = false } = {}) {
+	return React.createElement("div", { className: "wb-control" }, React.createElement("div", {
+		className: "wb-control-row",
+		style: wrap ? {
+			flexWrap: "wrap",
+			height: "auto",
+			alignItems: "flex-start"
+		} : void 0
+	}, React.createElement("span", { className: "wb-control-label" }, label), React.createElement("div", {
+		className: "wb-control-field",
+		style: wrap ? {
+			flex: "1 1 100%",
+			justifyContent: "flex-start"
+		} : void 0
+	}, field)));
+}
+function textButton(label, onClick, pressed) {
+	return React.createElement("button", {
+		type: "button",
+		className: "wb-control-action",
+		"aria-pressed": pressed ? "true" : void 0,
+		onClick,
+		style: pressed ? {
+			background: "var(--alid-accent-soft, transparent)",
+			color: "var(--alid-accent, inherit)",
+			borderColor: "var(--alid-accent, currentColor)"
+		} : void 0
+	}, label);
+}
+function swatchButton(hex, label, pressed, onClick) {
+	return React.createElement("button", {
+		type: "button",
+		className: "wb-swatch",
+		"aria-label": label,
+		"aria-pressed": pressed ? "true" : "false",
+		title: label,
+		onClick
+	}, React.createElement("span", { style: { background: hex } }));
+}
+function colorInput(label, value, fallback, onChange) {
+	return React.createElement("input", {
+		type: "color",
+		"aria-label": label,
+		value: ensureHexForPicker(value, fallback),
+		onChange: (event) => onChange(event.target.value)
+	});
+}
 function ChartColorAndHighlightControls({ selected, resolved, context }) {
 	if (!selected || !resolved) return null;
 	const dispatchStyleUpdate = (patchArgs) => {
@@ -25690,342 +25753,43 @@ function ChartColorAndHighlightControls({ selected, resolved, context }) {
 			replaceItemColors: true
 		});
 	};
-	return React.createElement("div", { style: {
-		display: "flex",
-		flexDirection: "column",
-		gap: "10px",
-		padding: "10px",
-		borderRadius: "8px",
-		border: "1px solid var(--alid-border-subtle, #e4e4e7)",
-		background: "var(--alid-bg-surface, #ffffff)"
-	} }, React.createElement("div", { style: {
-		display: "flex",
-		flexDirection: "column",
-		gap: "6px"
-	} }, React.createElement("div", { style: {
-		display: "flex",
-		alignItems: "center",
-		justifyContent: "space-between"
-	} }, React.createElement("span", { style: {
-		fontWeight: 600,
-		fontSize: "11.5px"
-	} }, "배경 색상 (Background)"), React.createElement("div", { style: {
-		display: "flex",
-		alignItems: "center",
-		gap: "6px"
-	} }, React.createElement("input", {
-		type: "color",
-		ariaLabel: "배경 색상 선택",
-		value: ensureHexForPicker(resolved.backgroundColor, resolved.resolvedTheme?.panel || "#ffffff"),
-		onChange: (e) => dispatchStyleUpdate({ backgroundColor: e.target.value }),
-		style: {
-			width: "24px",
-			height: "22px",
-			padding: 0,
-			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
-			borderRadius: "4px",
-			background: "transparent",
-			cursor: "pointer"
-		}
-	}), resolved.backgroundColor && React.createElement("button", {
+	const panelFallback = resolved.resolvedTheme?.panel || "#ffffff";
+	const accentFallback = resolved.resolvedTheme?.accent || "#3182f6";
+	const neutralFallback = resolved.resolvedTheme?.neutral || "#cbd5e1";
+	return React.createElement("div", { className: "wb-controls" }, React.createElement("fieldset", { className: "wb-control-group" }, React.createElement("legend", null, "배경"), controlRow("배경 색상", React.createElement(React.Fragment, null, resolved.backgroundColor !== "transparent" ? colorInput("배경 색상", resolved.backgroundColor, panelFallback, (value) => dispatchStyleUpdate({ backgroundColor: value })) : null, textButton("투명", () => dispatchStyleUpdate({ backgroundColor: "transparent" }), resolved.backgroundColor === "transparent"), resolved.backgroundColor ? textButton("기본값", () => dispatchStyleUpdate({ backgroundColor: "" })) : null)), controlRow("배경 팔레트", React.createElement("div", {
+		className: "wb-segmented",
+		role: "group",
+		"aria-label": "배경 팔레트"
+	}, ...BG_PRESETS.map((preset) => swatchButton(preset.value, `${preset.label} (${preset.value})`, resolved.backgroundColor?.toLowerCase() === preset.value.toLowerCase(), () => dispatchStyleUpdate({ backgroundColor: preset.value })))), { wrap: true })), React.createElement("fieldset", { className: "wb-control-group" }, React.createElement("legend", null, "색상"), controlRow("강조색", colorInput("강조 색상", resolved.accentColor, accentFallback, (value) => dispatchStyleUpdate({ accentColor: value }))), controlRow("강조 팔레트", React.createElement("div", {
+		className: "wb-segmented",
+		role: "group",
+		"aria-label": "강조 팔레트"
+	}, ...ACCENT_PRESETS.map((hex) => swatchButton(hex, `강조색 ${hex}`, resolved.accentColor?.toLowerCase() === hex.toLowerCase(), () => dispatchStyleUpdate({ accentColor: hex })))), { wrap: true }), controlRow("기본 데이터색", React.createElement(React.Fragment, null, colorInput("비강조 기본 데이터 색상", resolved.neutralColor, neutralFallback, (value) => dispatchStyleUpdate({ neutralColor: value })), resolved.neutralColor ? textButton("초기화", () => dispatchStyleUpdate({ neutralColor: "" })) : null))), React.createElement("fieldset", { className: "wb-control-group" }, React.createElement("legend", null, "강조 데이터"), controlRow("강조 규칙", React.createElement("div", {
+		className: "wb-segmented",
+		role: "group",
+		"aria-label": "강조 데이터 지정"
+	}, ...HIGHLIGHT_PRESETS.map((preset) => React.createElement("button", {
+		key: preset.id,
 		type: "button",
-		onClick: () => dispatchStyleUpdate({ backgroundColor: "" }),
-		style: {
-			padding: "2px 6px",
-			borderRadius: "4px",
-			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
-			background: "transparent",
-			color: "inherit",
-			fontSize: "10px",
-			cursor: "pointer"
-		}
-	}, "기본값"))), React.createElement("div", { style: {
-		display: "flex",
-		flexWrap: "wrap",
-		gap: "4px"
-	} }, ...BG_PRESETS.map((preset) => React.createElement("button", {
-		key: preset.value,
+		"aria-pressed": activePreset === preset.id ? "true" : "false",
+		onClick: () => dispatchStyleUpdate({ highlight: preset.id })
+	}, preset.labelKo))), { wrap: true }), activePreset === "custom" ? controlRow("직접 선택", textButton("자동으로", () => dispatchStyleUpdate({ highlight: "auto" }))) : null, dataItems.length > 0 && resolved.dataTargets?.kind !== "updown" ? controlRow("항목", React.createElement("div", {
+		className: "wb-segmented",
+		role: "group",
+		"aria-label": "특정 데이터 항목 강조"
+	}, ...dataItems.map((item) => React.createElement("button", {
+		key: item.key,
 		type: "button",
-		title: `${preset.label} (${preset.value})`,
-		onClick: () => dispatchStyleUpdate({ backgroundColor: preset.value }),
-		style: {
-			width: "20px",
-			height: "20px",
-			borderRadius: "5px",
-			border: resolved.backgroundColor?.toLowerCase() === preset.value.toLowerCase() ? "2px solid #3182f6" : "1px solid var(--alid-border-subtle, #d4d4d8)",
-			background: preset.value,
-			cursor: "pointer",
-			padding: 0
-		}
-	})))), React.createElement("div", { style: {
-		display: "flex",
-		flexDirection: "column",
-		gap: "6px",
-		paddingTop: "8px",
-		borderTop: "1px solid var(--alid-border-subtle, #e4e4e7)"
-	} }, React.createElement("div", { style: {
-		display: "flex",
-		alignItems: "center",
-		justifyContent: "space-between",
-		gap: "8px"
-	} }, React.createElement("div", { style: {
-		display: "flex",
-		alignItems: "center",
-		gap: "6px"
-	} }, React.createElement("input", {
-		type: "color",
-		ariaLabel: "강조 색상 선택",
-		value: ensureHexForPicker(resolved.accentColor, "#3182f6"),
-		onChange: (e) => dispatchStyleUpdate({ accentColor: e.target.value }),
-		style: {
-			width: "22px",
-			height: "20px",
-			padding: 0,
-			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
-			borderRadius: "4px",
-			background: "transparent",
-			cursor: "pointer"
-		}
-	}), React.createElement("span", { style: {
-		fontSize: "11px",
-		fontWeight: 600
-	} }, "강조색")), React.createElement("div", { style: {
-		display: "flex",
-		alignItems: "center",
-		gap: "6px"
-	} }, React.createElement("input", {
-		type: "color",
-		ariaLabel: "비강조 기본 데이터 색상 선택",
-		value: ensureHexForPicker(resolved.neutralColor, resolved.resolvedTheme?.neutral || "#cbd5e1"),
-		onChange: (e) => dispatchStyleUpdate({ neutralColor: e.target.value }),
-		style: {
-			width: "22px",
-			height: "20px",
-			padding: 0,
-			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
-			borderRadius: "4px",
-			background: "transparent",
-			cursor: "pointer"
-		}
-	}), React.createElement("span", { style: {
-		fontSize: "11px",
-		fontWeight: 600
-	} }, "기본 데이터색"), resolved.neutralColor && React.createElement("button", {
-		type: "button",
-		onClick: () => dispatchStyleUpdate({ neutralColor: "" }),
-		style: {
-			padding: "1px 5px",
-			borderRadius: "4px",
-			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
-			background: "transparent",
-			color: "inherit",
-			fontSize: "10px",
-			cursor: "pointer"
-		}
-	}, "초기화"))), React.createElement("div", { style: {
-		display: "flex",
-		flexWrap: "wrap",
-		gap: "4px"
-	} }, ...ACCENT_PRESETS.map((hex) => React.createElement("button", {
-		key: hex,
-		type: "button",
-		title: `강조색 ${hex}`,
-		onClick: () => dispatchStyleUpdate({ accentColor: hex }),
-		style: {
-			width: "18px",
-			height: "18px",
-			borderRadius: "999px",
-			border: resolved.accentColor?.toLowerCase() === hex.toLowerCase() ? "2px solid var(--alid-text, #18181b)" : "1px solid rgba(0,0,0,0.15)",
-			background: hex,
-			cursor: "pointer",
-			padding: 0
-		}
-	})))), React.createElement("div", { style: {
-		display: "flex",
-		flexDirection: "column",
-		gap: "6px",
-		paddingTop: "8px",
-		borderTop: "1px solid var(--alid-border-subtle, #e4e4e7)"
-	} }, React.createElement("div", { style: {
-		display: "flex",
-		alignItems: "center",
-		justifyContent: "space-between"
-	} }, React.createElement("span", { style: {
-		fontWeight: 600,
-		fontSize: "11.5px"
-	} }, "강조 데이터 지정 (Highlight)"), activePreset === "custom" && React.createElement("button", {
-		type: "button",
-		onClick: () => dispatchStyleUpdate({ highlight: "auto" }),
-		style: {
-			padding: "1px 6px",
-			borderRadius: "4px",
-			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
-			background: "transparent",
-			color: "inherit",
-			fontSize: "10px",
-			cursor: "pointer"
-		}
-	}, "자동으로")), React.createElement("div", { style: {
-		display: "flex",
-		flexWrap: "wrap",
-		gap: "4px"
-	} }, ...HIGHLIGHT_PRESETS.map((preset) => {
-		const isSelected = activePreset === preset.id;
-		return React.createElement("button", {
-			key: preset.id,
-			type: "button",
-			onClick: () => dispatchStyleUpdate({ highlight: preset.id }),
-			style: {
-				padding: "3px 7px",
-				borderRadius: "5px",
-				border: "1px solid var(--alid-border-subtle, #d4d4d8)",
-				background: isSelected ? "#3182f6" : "transparent",
-				color: isSelected ? "#ffffff" : "inherit",
-				fontSize: "10.5px",
-				fontWeight: isSelected ? 600 : 400,
-				cursor: "pointer"
-			}
-		}, preset.labelKo);
-	})), dataItems.length > 0 && resolved.dataTargets?.kind !== "updown" && React.createElement("div", { style: {
-		display: "flex",
-		flexDirection: "column",
-		gap: "4px",
-		marginTop: "2px"
-	} }, React.createElement("span", { style: {
-		fontSize: "10.5px",
-		color: "var(--alid-text-muted, #71717a)"
-	} }, "클릭하여 특정 데이터 항목만 직접 강조:"), React.createElement("div", { style: {
-		display: "flex",
-		flexWrap: "wrap",
-		gap: "4px"
-	} }, ...dataItems.map((item) => {
-		const isChipActive = customHighlightSet.has(item.key);
-		return React.createElement("button", {
-			key: item.key,
-			type: "button",
-			onClick: () => handleToggleHighlightItem(item.key),
-			style: {
-				padding: "2px 7px",
-				borderRadius: "999px",
-				border: isChipActive ? `1.5px solid ${resolved.accentColor || "#3182f6"}` : "1px solid var(--alid-border-subtle, #d4d4d8)",
-				background: isChipActive ? "rgba(49, 130, 246, 0.14)" : "transparent",
-				color: "inherit",
-				fontSize: "10.5px",
-				fontWeight: isChipActive ? 600 : 400,
-				cursor: "pointer"
-			}
-		}, item.label);
-	})))), dataItems.length > 0 && React.createElement("div", { style: {
-		display: "flex",
-		flexDirection: "column",
-		gap: "6px",
-		paddingTop: "8px",
-		borderTop: "1px solid var(--alid-border-subtle, #e4e4e7)"
-	} }, React.createElement("div", { style: {
-		display: "flex",
-		alignItems: "center",
-		justifyContent: "space-between",
-		gap: "4px"
-	} }, React.createElement("span", { style: {
-		fontWeight: 600,
-		fontSize: "11.5px"
-	} }, "세부 데이터 컴포넌트 색상"), React.createElement("div", { style: {
-		display: "flex",
-		gap: "4px"
-	} }, React.createElement("button", {
-		type: "button",
-		onClick: handleAssignPalette,
-		style: {
-			padding: "2px 6px",
-			borderRadius: "4px",
-			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
-			background: "transparent",
-			color: "inherit",
-			fontSize: "10px",
-			cursor: "pointer"
-		}
-	}, "팔레트 자동 배정"), hasCustomItemColors && React.createElement("button", {
-		type: "button",
-		onClick: () => dispatchStyleUpdate({
-			itemColors: {},
-			replaceItemColors: true
-		}),
-		style: {
-			padding: "2px 6px",
-			borderRadius: "4px",
-			border: "1px solid var(--alid-border-subtle, #d4d4d8)",
-			background: "transparent",
-			color: "inherit",
-			fontSize: "10px",
-			cursor: "pointer"
-		}
-	}, "초기화"))), React.createElement("div", { style: {
-		display: "grid",
-		gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-		gap: "5px",
-		maxHeight: "160px",
-		overflowY: "auto",
-		paddingRight: "2px"
-	} }, ...dataItems.map((item, idx) => {
+		"aria-pressed": customHighlightSet.has(item.key) ? "true" : "false",
+		onClick: () => handleToggleHighlightItem(item.key)
+	}, item.label))), { wrap: true }) : null), dataItems.length > 0 ? React.createElement("fieldset", { className: "wb-control-group" }, React.createElement("legend", null, "세부 데이터 색상"), controlRow("일괄", React.createElement(React.Fragment, null, textButton("팔레트 자동 배정", handleAssignPalette), hasCustomItemColors ? textButton("초기화", () => dispatchStyleUpdate({
+		itemColors: {},
+		replaceItemColors: true
+	})) : null)), ...dataItems.map((item, idx) => {
 		const customHex = itemColors[item.key];
-		const pickerValue = ensureHexForPicker(customHex, item.key === "up" ? resolved.resolvedTheme?.accent || "#3182f6" : item.key === "down" ? resolved.resolvedTheme?.neutralStrong || "#64748b" : customHighlightSet.has(item.key) ? resolved.resolvedTheme?.accent || "#3182f6" : COMPONENT_PALETTE[idx % COMPONENT_PALETTE.length]);
-		return React.createElement("div", {
-			key: item.key,
-			style: {
-				display: "flex",
-				alignItems: "center",
-				justifyContent: "space-between",
-				gap: "4px",
-				padding: "3px 6px",
-				borderRadius: "6px",
-				border: customHex ? `1px solid ${customHex}` : "1px solid var(--alid-border-subtle, #e4e4e7)",
-				background: customHex ? "rgba(49, 130, 246, 0.04)" : "transparent"
-			}
-		}, React.createElement("label", { style: {
-			display: "flex",
-			alignItems: "center",
-			gap: "5px",
-			minWidth: 0,
-			flex: 1,
-			cursor: "pointer"
-		} }, React.createElement("input", {
-			type: "color",
-			value: pickerValue,
-			onChange: (e) => dispatchStyleUpdate({ itemColors: { [item.key]: e.target.value } }),
-			style: {
-				width: "18px",
-				height: "18px",
-				padding: 0,
-				border: "none",
-				borderRadius: "4px",
-				background: "transparent",
-				cursor: "pointer",
-				flexShrink: 0
-			}
-		}), React.createElement("span", {
-			title: item.label,
-			style: {
-				fontSize: "11px",
-				fontWeight: customHex ? 600 : 400,
-				overflow: "hidden",
-				textOverflow: "ellipsis",
-				whiteSpace: "nowrap"
-			}
-		}, item.label)), customHex && React.createElement("button", {
-			type: "button",
-			title: "개별 색상 해제",
-			onClick: () => dispatchStyleUpdate({ itemColors: { [item.key]: "" } }),
-			style: {
-				border: "none",
-				background: "transparent",
-				color: "var(--alid-text-muted, #71717a)",
-				fontSize: "11px",
-				cursor: "pointer",
-				padding: "0 2px",
-				lineHeight: 1
-			}
-		}, "×"));
-	}))));
+		const defaultFallback = item.key === "up" ? accentFallback : item.key === "down" ? resolved.resolvedTheme?.neutralStrong || "#64748b" : customHighlightSet.has(item.key) ? accentFallback : COMPONENT_PALETTE[idx % COMPONENT_PALETTE.length];
+		return controlRow(item.label, React.createElement(React.Fragment, null, colorInput(item.label, customHex, defaultFallback, (value) => dispatchStyleUpdate({ itemColors: { [item.key]: value } })), customHex ? textButton("해제", () => dispatchStyleUpdate({ itemColors: { [item.key]: "" } })) : null));
+	})) : null);
 }
 function ZtdChartStudioView({ context }) {
 	const [tick, setTick] = useState(0);
@@ -26492,8 +26256,11 @@ function sanitizePatch(rawPatch, existingProps = CHART_DEFAULTS) {
 	}
 	if (rawPatch.backgroundColor !== void 0) {
 		if (rawPatch.backgroundColor === "") clean.backgroundColor = "";
-		else if (!isValidHexColor(rawPatch.backgroundColor)) throw new Error("INVALID_INPUT: backgroundColor must be \"\" or a #rrggbb hex string");
-		else clean.backgroundColor = rawPatch.backgroundColor.trim();
+		else {
+			const background = resolveBackgroundColor(rawPatch.backgroundColor);
+			if (!background) throw new Error("INVALID_INPUT: backgroundColor must be \"\", \"transparent\", or a #rrggbb hex string");
+			clean.backgroundColor = background;
+		}
 	}
 	if (rawPatch.cornerRadius !== void 0) {
 		const radius = Number(rawPatch.cornerRadius);
@@ -26710,7 +26477,7 @@ function registerZtdChartTools(context) {
 				variant: `Allowed: ${ALLOWED_VARIANTS.join(", ")}`,
 				legendMode: `Allowed: ${ALLOWED_LEGENDS.join(", ")}`,
 				accentColor: "string (#rrggbb): 강조 계열 색상",
-				backgroundColor: "string (#rrggbb or \"\"): 차트 카드 배경 색상",
+				backgroundColor: "string (#rrggbb, \"transparent\", or \"\"): 차트 카드 배경 색상. transparent면 카드 배경만 투명",
 				cornerRadius: "number (0–64): 차트 카드 모서리 둥글기. 0이면 직각",
 				data: "array of row objects (비워 두면 해당 차트 유형의 내장 샘플 데이터 사용)",
 				encoding: "object: 데이터 컬럼 매핑 (예: { x, y, series } 또는 { label, value })",
@@ -27119,7 +26886,7 @@ var plugin = {
 				...typeof args.subtitle === "string" ? { subtitle: args.subtitle } : {},
 				...typeof args.takeaway === "string" ? { takeaway: args.takeaway } : {},
 				...isValidHexColor(args.accentColor) ? { accentColor: args.accentColor.trim() } : {},
-				...isValidHexColor(args.backgroundColor) ? { backgroundColor: args.backgroundColor.trim() } : {},
+				...resolveBackgroundColor(args.backgroundColor) ? { backgroundColor: resolveBackgroundColor(args.backgroundColor) } : {},
 				...Array.isArray(args.data) ? { data: args.data } : {},
 				...args.encoding && typeof args.encoding === "object" ? { encoding: args.encoding } : {},
 				...Object.keys(initialOptions).length > 0 ? { options: initialOptions } : {}
@@ -27270,7 +27037,7 @@ var plugin = {
 				const patch = {};
 				if (typeof args.theme === "string" && (args.theme === "light" || args.theme === "dark")) patch.theme = args.theme;
 				if ("accentColor" in args && isValidHexColor(args.accentColor)) patch.accentColor = args.accentColor.trim();
-				if ("backgroundColor" in args) patch.backgroundColor = isValidHexColor(args.backgroundColor) ? args.backgroundColor.trim() : "";
+				if ("backgroundColor" in args) patch.backgroundColor = resolveBackgroundColor(args.backgroundColor);
 				if (optionsChanged) patch.options = nextOptions;
 				if (Object.keys(patch).length > 0) ops.push({
 					id,

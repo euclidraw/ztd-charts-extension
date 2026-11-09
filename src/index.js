@@ -26,6 +26,7 @@ import {
   normalizeChartType,
   normalizeLang,
   parseDataInput,
+  resolveBackgroundColor,
   resolveChartSpec,
   resolveColorForZtdKey,
   sanitizeItemColors,
@@ -340,7 +341,7 @@ const plugin = {
         ...(typeof args.subtitle === 'string' ? { subtitle: args.subtitle } : {}),
         ...(typeof args.takeaway === 'string' ? { takeaway: args.takeaway } : {}),
         ...(isValidHexColor(args.accentColor) ? { accentColor: args.accentColor.trim() } : {}),
-        ...(isValidHexColor(args.backgroundColor) ? { backgroundColor: args.backgroundColor.trim() } : {}),
+        ...(resolveBackgroundColor(args.backgroundColor) ? { backgroundColor: resolveBackgroundColor(args.backgroundColor) } : {}),
         ...(Array.isArray(args.data) ? { data: args.data } : {}),
         ...(args.encoding && typeof args.encoding === 'object' ? { encoding: args.encoding } : {}),
         ...(Object.keys(initialOptions).length > 0 ? { options: initialOptions } : {}),
@@ -510,9 +511,7 @@ const plugin = {
           patch.accentColor = args.accentColor.trim();
         }
         if ('backgroundColor' in args) {
-          patch.backgroundColor = isValidHexColor(args.backgroundColor)
-            ? args.backgroundColor.trim()
-            : '';
+          patch.backgroundColor = resolveBackgroundColor(args.backgroundColor);
         }
         if (optionsChanged) {
           patch.options = nextOptions;

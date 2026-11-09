@@ -61,6 +61,66 @@ function readSelectedChartEntity(world, selectedIds) {
   return null;
 }
 
+function controlRow(label, field, { wrap = false } = {}) {
+  return React.createElement(
+    'div',
+    { className: 'wb-control' },
+    React.createElement(
+      'div',
+      {
+        className: 'wb-control-row',
+        style: wrap ? { flexWrap: 'wrap', height: 'auto', alignItems: 'flex-start' } : undefined,
+      },
+      React.createElement('span', { className: 'wb-control-label' }, label),
+      React.createElement(
+        'div',
+        { className: 'wb-control-field', style: wrap ? { flex: '1 1 100%', justifyContent: 'flex-start' } : undefined },
+        field,
+      ),
+    ),
+  );
+}
+
+function textButton(label, onClick, pressed) {
+  return React.createElement(
+    'button',
+    {
+      type: 'button',
+      className: 'wb-control-action',
+      'aria-pressed': pressed ? 'true' : undefined,
+      onClick,
+      style: pressed
+        ? { background: 'var(--alid-accent-soft, transparent)', color: 'var(--alid-accent, inherit)', borderColor: 'var(--alid-accent, currentColor)' }
+        : undefined,
+    },
+    label,
+  );
+}
+
+function swatchButton(hex, label, pressed, onClick) {
+  return React.createElement(
+    'button',
+    {
+      type: 'button',
+      className: 'wb-swatch',
+      'aria-label': label,
+      'aria-pressed': pressed ? 'true' : 'false',
+      title: label,
+      onClick,
+    },
+    React.createElement('span', { style: { background: hex } }),
+  );
+}
+
+function colorInput(label, value, fallback, onChange) {
+  return React.createElement('input', {
+    type: 'color',
+    'aria-label': label,
+    value: ensureHexForPicker(value, fallback),
+    onChange: event => onChange(event.target.value),
+  });
+}
+
 export function ChartColorAndHighlightControls({ selected, resolved, context }) {
   if (!selected || !resolved) return null;
 
@@ -114,468 +174,166 @@ export function ChartColorAndHighlightControls({ selected, resolved, context }) 
     dispatchStyleUpdate({ itemColors: nextMap, replaceItemColors: true });
   };
 
+  const panelFallback = resolved.resolvedTheme?.panel || '#ffffff';
+  const accentFallback = resolved.resolvedTheme?.accent || '#3182f6';
+  const neutralFallback = resolved.resolvedTheme?.neutral || '#cbd5e1';
+
   return React.createElement(
     'div',
-    {
-      style: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '10px',
-        padding: '10px',
-        borderRadius: '8px',
-        border: '1px solid var(--alid-border-subtle, #e4e4e7)',
-        background: 'var(--alid-bg-surface, #ffffff)',
-      },
-    },
-    // Section 1: Background Color
+    { className: 'wb-controls' },
     React.createElement(
-      'div',
-      { style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
-      React.createElement(
-        'div',
-        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
+      'fieldset',
+      { className: 'wb-control-group' },
+      React.createElement('legend', null, '배경'),
+      controlRow(
+        '배경 색상',
         React.createElement(
-          'span',
-          { style: { fontWeight: 600, fontSize: '11.5px' } },
-          '배경 색상 (Background)',
-        ),
-        React.createElement(
-          'div',
-          { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
-          React.createElement('input', {
-            type: 'color',
-            ariaLabel: '배경 색상 선택',
-            value: ensureHexForPicker(resolved.backgroundColor, resolved.resolvedTheme?.panel || '#ffffff'),
-            onChange: e => dispatchStyleUpdate({ backgroundColor: e.target.value }),
-            style: {
-              width: '24px',
-              height: '22px',
-              padding: 0,
-              border: '1px solid var(--alid-border-subtle, #d4d4d8)',
-              borderRadius: '4px',
-              background: 'transparent',
-              cursor: 'pointer',
-            },
-          }),
-          resolved.backgroundColor &&
-            React.createElement(
-              'button',
-              {
-                type: 'button',
-                onClick: () => dispatchStyleUpdate({ backgroundColor: '' }),
-                style: {
-                  padding: '2px 6px',
-                  borderRadius: '4px',
-                  border: '1px solid var(--alid-border-subtle, #d4d4d8)',
-                  background: 'transparent',
-                  color: 'inherit',
-                  fontSize: '10px',
-                  cursor: 'pointer',
-                },
-              },
-              '기본값',
-            ),
+          React.Fragment,
+          null,
+          resolved.backgroundColor !== 'transparent'
+            ? colorInput('배경 색상', resolved.backgroundColor, panelFallback, value => dispatchStyleUpdate({ backgroundColor: value }))
+            : null,
+          textButton('투명', () => dispatchStyleUpdate({ backgroundColor: 'transparent' }), resolved.backgroundColor === 'transparent'),
+          resolved.backgroundColor
+            ? textButton('기본값', () => dispatchStyleUpdate({ backgroundColor: '' }))
+            : null,
         ),
       ),
-      React.createElement(
-        'div',
-        { style: { display: 'flex', flexWrap: 'wrap', gap: '4px' } },
-        ...BG_PRESETS.map(preset =>
-          React.createElement('button', {
-            key: preset.value,
-            type: 'button',
-            title: `${preset.label} (${preset.value})`,
-            onClick: () => dispatchStyleUpdate({ backgroundColor: preset.value }),
-            style: {
-              width: '20px',
-              height: '20px',
-              borderRadius: '5px',
-              border:
-                resolved.backgroundColor?.toLowerCase() === preset.value.toLowerCase()
-                  ? '2px solid #3182f6'
-                  : '1px solid var(--alid-border-subtle, #d4d4d8)',
-              background: preset.value,
-              cursor: 'pointer',
-              padding: 0,
-            },
-          }),
+      controlRow(
+        '배경 팔레트',
+        React.createElement(
+          'div',
+          { className: 'wb-segmented', role: 'group', 'aria-label': '배경 팔레트' },
+          ...BG_PRESETS.map(preset => swatchButton(
+            preset.value,
+            `${preset.label} (${preset.value})`,
+            resolved.backgroundColor?.toLowerCase() === preset.value.toLowerCase(),
+            () => dispatchStyleUpdate({ backgroundColor: preset.value }),
+          )),
+        ),
+        { wrap: true },
+      ),
+    ),
+    React.createElement(
+      'fieldset',
+      { className: 'wb-control-group' },
+      React.createElement('legend', null, '색상'),
+      controlRow(
+        '강조색',
+        colorInput('강조 색상', resolved.accentColor, accentFallback, value => dispatchStyleUpdate({ accentColor: value })),
+      ),
+      controlRow(
+        '강조 팔레트',
+        React.createElement(
+          'div',
+          { className: 'wb-segmented', role: 'group', 'aria-label': '강조 팔레트' },
+          ...ACCENT_PRESETS.map(hex => swatchButton(
+            hex,
+            `강조색 ${hex}`,
+            resolved.accentColor?.toLowerCase() === hex.toLowerCase(),
+            () => dispatchStyleUpdate({ accentColor: hex }),
+          )),
+        ),
+        { wrap: true },
+      ),
+      controlRow(
+        '기본 데이터색',
+        React.createElement(
+          React.Fragment,
+          null,
+          colorInput('비강조 기본 데이터 색상', resolved.neutralColor, neutralFallback, value => dispatchStyleUpdate({ neutralColor: value })),
+          resolved.neutralColor
+            ? textButton('초기화', () => dispatchStyleUpdate({ neutralColor: '' }))
+            : null,
         ),
       ),
     ),
-
-    // Section 2: Accent & Neutral Colors
     React.createElement(
-      'div',
-      {
-        style: {
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
-          paddingTop: '8px',
-          borderTop: '1px solid var(--alid-border-subtle, #e4e4e7)',
-        },
-      },
-      React.createElement(
-        'div',
-        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' } },
+      'fieldset',
+      { className: 'wb-control-group' },
+      React.createElement('legend', null, '강조 데이터'),
+      controlRow(
+        '강조 규칙',
         React.createElement(
           'div',
-          { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
-          React.createElement('input', {
-            type: 'color',
-            ariaLabel: '강조 색상 선택',
-            value: ensureHexForPicker(resolved.accentColor, '#3182f6'),
-            onChange: e => dispatchStyleUpdate({ accentColor: e.target.value }),
-            style: {
-              width: '22px',
-              height: '20px',
-              padding: 0,
-              border: '1px solid var(--alid-border-subtle, #d4d4d8)',
-              borderRadius: '4px',
-              background: 'transparent',
-              cursor: 'pointer',
-            },
-          }),
-          React.createElement('span', { style: { fontSize: '11px', fontWeight: 600 } }, '강조색'),
-        ),
-        React.createElement(
-          'div',
-          { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
-          React.createElement('input', {
-            type: 'color',
-            ariaLabel: '비강조 기본 데이터 색상 선택',
-            value: ensureHexForPicker(resolved.neutralColor, resolved.resolvedTheme?.neutral || '#cbd5e1'),
-            onChange: e => dispatchStyleUpdate({ neutralColor: e.target.value }),
-            style: {
-              width: '22px',
-              height: '20px',
-              padding: 0,
-              border: '1px solid var(--alid-border-subtle, #d4d4d8)',
-              borderRadius: '4px',
-              background: 'transparent',
-              cursor: 'pointer',
-            },
-          }),
-          React.createElement('span', { style: { fontSize: '11px', fontWeight: 600 } }, '기본 데이터색'),
-          resolved.neutralColor &&
-            React.createElement(
-              'button',
-              {
-                type: 'button',
-                onClick: () => dispatchStyleUpdate({ neutralColor: '' }),
-                style: {
-                  padding: '1px 5px',
-                  borderRadius: '4px',
-                  border: '1px solid var(--alid-border-subtle, #d4d4d8)',
-                  background: 'transparent',
-                  color: 'inherit',
-                  fontSize: '10px',
-                  cursor: 'pointer',
-                },
-              },
-              '초기화',
-            ),
-        ),
-      ),
-      React.createElement(
-        'div',
-        { style: { display: 'flex', flexWrap: 'wrap', gap: '4px' } },
-        ...ACCENT_PRESETS.map(hex =>
-          React.createElement('button', {
-            key: hex,
-            type: 'button',
-            title: `강조색 ${hex}`,
-            onClick: () => dispatchStyleUpdate({ accentColor: hex }),
-            style: {
-              width: '18px',
-              height: '18px',
-              borderRadius: '999px',
-              border:
-                resolved.accentColor?.toLowerCase() === hex.toLowerCase()
-                  ? '2px solid var(--alid-text, #18181b)'
-                  : '1px solid rgba(0,0,0,0.15)',
-              background: hex,
-              cursor: 'pointer',
-              padding: 0,
-            },
-          }),
-        ),
-      ),
-    ),
-
-    // Section 3: Highlighted Data Selection
-    React.createElement(
-      'div',
-      {
-        style: {
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
-          paddingTop: '8px',
-          borderTop: '1px solid var(--alid-border-subtle, #e4e4e7)',
-        },
-      },
-      React.createElement(
-        'div',
-        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
-        React.createElement(
-          'span',
-          { style: { fontWeight: 600, fontSize: '11.5px' } },
-          '강조 데이터 지정 (Highlight)',
-        ),
-        activePreset === 'custom' &&
-          React.createElement(
-            'button',
-            {
-              type: 'button',
-              onClick: () => dispatchStyleUpdate({ highlight: 'auto' }),
-              style: {
-                padding: '1px 6px',
-                borderRadius: '4px',
-                border: '1px solid var(--alid-border-subtle, #d4d4d8)',
-                background: 'transparent',
-                color: 'inherit',
-                fontSize: '10px',
-                cursor: 'pointer',
-              },
-            },
-            '자동으로',
-          ),
-      ),
-      React.createElement(
-        'div',
-        { style: { display: 'flex', flexWrap: 'wrap', gap: '4px' } },
-        ...HIGHLIGHT_PRESETS.map(preset => {
-          const isSelected = activePreset === preset.id;
-          return React.createElement(
+          { className: 'wb-segmented', role: 'group', 'aria-label': '강조 데이터 지정' },
+          ...HIGHLIGHT_PRESETS.map(preset => React.createElement(
             'button',
             {
               key: preset.id,
               type: 'button',
+              'aria-pressed': activePreset === preset.id ? 'true' : 'false',
               onClick: () => dispatchStyleUpdate({ highlight: preset.id }),
-              style: {
-                padding: '3px 7px',
-                borderRadius: '5px',
-                border: '1px solid var(--alid-border-subtle, #d4d4d8)',
-                background: isSelected ? '#3182f6' : 'transparent',
-                color: isSelected ? '#ffffff' : 'inherit',
-                fontSize: '10.5px',
-                fontWeight: isSelected ? 600 : 400,
-                cursor: 'pointer',
-              },
             },
             preset.labelKo,
-          );
-        }),
-      ),
-      dataItems.length > 0 &&
-        resolved.dataTargets?.kind !== 'updown' &&
-        React.createElement(
-          'div',
-          { style: { display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '2px' } },
-          React.createElement(
-            'span',
-            { style: { fontSize: '10.5px', color: 'var(--alid-text-muted, #71717a)' } },
-            '클릭하여 특정 데이터 항목만 직접 강조:',
-          ),
-          React.createElement(
-            'div',
-            { style: { display: 'flex', flexWrap: 'wrap', gap: '4px' } },
-            ...dataItems.map(item => {
-              const isChipActive = customHighlightSet.has(item.key);
-              return React.createElement(
-                'button',
-                {
-                  key: item.key,
-                  type: 'button',
-                  onClick: () => handleToggleHighlightItem(item.key),
-                  style: {
-                    padding: '2px 7px',
-                    borderRadius: '999px',
-                    border: isChipActive
-                      ? `1.5px solid ${resolved.accentColor || '#3182f6'}`
-                      : '1px solid var(--alid-border-subtle, #d4d4d8)',
-                    background: isChipActive ? 'rgba(49, 130, 246, 0.14)' : 'transparent',
-                    color: 'inherit',
-                    fontSize: '10.5px',
-                    fontWeight: isChipActive ? 600 : 400,
-                    cursor: 'pointer',
-                  },
-                },
-                item.label,
-              );
-            }),
-          ),
+          )),
         ),
-    ),
-
-    // Section 4: Per-Data Component Color Picker
-    dataItems.length > 0 &&
-      React.createElement(
-        'div',
-        {
-          style: {
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '6px',
-            paddingTop: '8px',
-            borderTop: '1px solid var(--alid-border-subtle, #e4e4e7)',
-          },
-        },
-        React.createElement(
-          'div',
-          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px' } },
-          React.createElement(
-            'span',
-            { style: { fontWeight: 600, fontSize: '11.5px' } },
-            '세부 데이터 컴포넌트 색상',
-          ),
+        { wrap: true },
+      ),
+      activePreset === 'custom'
+        ? controlRow('직접 선택', textButton('자동으로', () => dispatchStyleUpdate({ highlight: 'auto' })))
+        : null,
+      dataItems.length > 0 && resolved.dataTargets?.kind !== 'updown'
+        ? controlRow(
+          '항목',
           React.createElement(
             'div',
-            { style: { display: 'flex', gap: '4px' } },
-            React.createElement(
+            { className: 'wb-segmented', role: 'group', 'aria-label': '특정 데이터 항목 강조' },
+            ...dataItems.map(item => React.createElement(
               'button',
               {
+                key: item.key,
                 type: 'button',
-                onClick: handleAssignPalette,
-                style: {
-                  padding: '2px 6px',
-                  borderRadius: '4px',
-                  border: '1px solid var(--alid-border-subtle, #d4d4d8)',
-                  background: 'transparent',
-                  color: 'inherit',
-                  fontSize: '10px',
-                  cursor: 'pointer',
-                },
+                'aria-pressed': customHighlightSet.has(item.key) ? 'true' : 'false',
+                onClick: () => handleToggleHighlightItem(item.key),
               },
-              '팔레트 자동 배정',
-            ),
-            hasCustomItemColors &&
-              React.createElement(
-                'button',
-                {
-                  type: 'button',
-                  onClick: () => dispatchStyleUpdate({ itemColors: {}, replaceItemColors: true }),
-                  style: {
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--alid-border-subtle, #d4d4d8)',
-                    background: 'transparent',
-                    color: 'inherit',
-                    fontSize: '10px',
-                    cursor: 'pointer',
-                  },
-                },
-                '초기화',
-              ),
+              item.label,
+            )),
+          ),
+          { wrap: true },
+        )
+        : null,
+    ),
+    dataItems.length > 0
+      ? React.createElement(
+        'fieldset',
+        { className: 'wb-control-group' },
+        React.createElement('legend', null, '세부 데이터 색상'),
+        controlRow(
+          '일괄',
+          React.createElement(
+            React.Fragment,
+            null,
+            textButton('팔레트 자동 배정', handleAssignPalette),
+            hasCustomItemColors
+              ? textButton('초기화', () => dispatchStyleUpdate({ itemColors: {}, replaceItemColors: true }))
+              : null,
           ),
         ),
-        React.createElement(
-          'div',
-          {
-            style: {
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-              gap: '5px',
-              maxHeight: '160px',
-              overflowY: 'auto',
-              paddingRight: '2px',
-            },
-          },
-          ...dataItems.map((item, idx) => {
-            const customHex = itemColors[item.key];
-            const defaultFallback =
-              item.key === 'up'
-                ? resolved.resolvedTheme?.accent || '#3182f6'
-                : item.key === 'down'
-                  ? resolved.resolvedTheme?.neutralStrong || '#64748b'
-                  : customHighlightSet.has(item.key)
-                    ? resolved.resolvedTheme?.accent || '#3182f6'
-                    : COMPONENT_PALETTE[idx % COMPONENT_PALETTE.length];
-            const pickerValue = ensureHexForPicker(customHex, defaultFallback);
-
-            return React.createElement(
-              'div',
-              {
-                key: item.key,
-                style: {
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '4px',
-                  padding: '3px 6px',
-                  borderRadius: '6px',
-                  border: customHex
-                    ? `1px solid ${customHex}`
-                    : '1px solid var(--alid-border-subtle, #e4e4e7)',
-                  background: customHex ? 'rgba(49, 130, 246, 0.04)' : 'transparent',
-                },
-              },
-              React.createElement(
-                'label',
-                {
-                  style: {
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    minWidth: 0,
-                    flex: 1,
-                    cursor: 'pointer',
-                  },
-                },
-                React.createElement('input', {
-                  type: 'color',
-                  value: pickerValue,
-                  onChange: e => dispatchStyleUpdate({ itemColors: { [item.key]: e.target.value } }),
-                  style: {
-                    width: '18px',
-                    height: '18px',
-                    padding: 0,
-                    border: 'none',
-                    borderRadius: '4px',
-                    background: 'transparent',
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                  },
-                }),
-                React.createElement(
-                  'span',
-                  {
-                    title: item.label,
-                    style: {
-                      fontSize: '11px',
-                      fontWeight: customHex ? 600 : 400,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    },
-                  },
-                  item.label,
-                ),
-              ),
-              customHex &&
-                React.createElement(
-                  'button',
-                  {
-                    type: 'button',
-                    title: '개별 색상 해제',
-                    onClick: () => dispatchStyleUpdate({ itemColors: { [item.key]: '' } }),
-                    style: {
-                      border: 'none',
-                      background: 'transparent',
-                      color: 'var(--alid-text-muted, #71717a)',
-                      fontSize: '11px',
-                      cursor: 'pointer',
-                      padding: '0 2px',
-                      lineHeight: 1,
-                    },
-                  },
-                  '×',
-                ),
-            );
-          }),
-        ),
-      ),
+        ...dataItems.map((item, idx) => {
+          const customHex = itemColors[item.key];
+          const defaultFallback =
+            item.key === 'up'
+              ? accentFallback
+              : item.key === 'down'
+                ? resolved.resolvedTheme?.neutralStrong || '#64748b'
+                : customHighlightSet.has(item.key)
+                  ? accentFallback
+                  : COMPONENT_PALETTE[idx % COMPONENT_PALETTE.length];
+          return controlRow(
+            item.label,
+            React.createElement(
+              React.Fragment,
+              null,
+              colorInput(item.label, customHex, defaultFallback, value => dispatchStyleUpdate({ itemColors: { [item.key]: value } })),
+              customHex
+                ? textButton('해제', () => dispatchStyleUpdate({ itemColors: { [item.key]: '' } }))
+                : null,
+            ),
+          );
+        }),
+      )
+      : null,
   );
 }
 

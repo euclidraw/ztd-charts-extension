@@ -18,6 +18,7 @@ function ensureDocumentBaseCss(doc) {
       style.textContent = [
         baseCss,
         '[data-role="ztd-chart-mount"] .ztd-card { height: 100%; box-sizing: border-box; margin: 0; }',
+        '[data-ztd-card-background="transparent"] .ztd-card { background: transparent !important; border-color: transparent !important; box-shadow: none !important; }',
         '[data-role="ztd-chart-mount"] [data-chart-field], [data-role="ztd-chart-mount"] [data-chart-option-field] { pointer-events: auto !important; cursor: text !important; }',
         'input[data-ztd-chart-editor="true"], input[data-ztd-chart-editor="true"]:focus, input[data-ztd-chart-editor="true"]:focus-visible { background: transparent !important; border: none !important; outline: none !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; }',
       ].join('\n');
@@ -335,10 +336,17 @@ export function renderChartDom(hostEl, props, derived, entityId = 'chart') {
   }
 
   const themeVars = themeToCss(resolvedTheme);
+  const transparentCard = resolved.backgroundColor === 'transparent';
+  if (hostEl.dataset) {
+    if (transparentCard) hostEl.dataset.ztdCardBackground = 'transparent';
+    else delete hostEl.dataset.ztdCardBackground;
+  }
   if (hostEl.style) {
     hostEl.style.cssText =
       `${themeVars};width:100%;height:${height}px;box-sizing:border-box;position:relative;overflow:hidden;` +
-      `border-radius:${resolved.cornerRadius}px;background:${resolvedTheme.panel};border:1px solid ${resolvedTheme.line};` +
+      `border-radius:${resolved.cornerRadius}px;` +
+      `background:${transparentCard ? 'transparent' : (resolved.backgroundColor || resolvedTheme.panel)};` +
+      `border:1px solid ${transparentCard ? 'transparent' : resolvedTheme.line};` +
       `color:${resolvedTheme.ink};font-family:${resolvedTheme.fontFamily};user-select:none;`;
   }
 

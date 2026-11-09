@@ -368,6 +368,8 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
     legendItems,
     cornerRadius,
   } = resolved;
+  const cardFill = resolved.backgroundColor === 'transparent' ? 'none' : (resolved.backgroundColor || resolvedTheme.panel);
+  const cardStroke = resolved.backgroundColor === 'transparent' ? 'none' : resolvedTheme.line;
 
   const padX = variant === 'card' ? 20 : 12;
   const padTop = variant === 'card' ? 18 : 12;
@@ -447,7 +449,7 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
     `<g transform="${transformAttr}" data-chart-type="${escapeXml(resolved.chartType)}" font-family="${fontFamily}">` +
     `<defs><clipPath id="${clipId}"><rect width="${width}" height="${height}" rx="${cornerRadius}"/></clipPath></defs>` +
     `<g clip-path="url(#${clipId})">` +
-    `<rect width="${width}" height="${height}" rx="${cornerRadius}" fill="${escapeXml(resolvedTheme.panel)}" stroke="${escapeXml(resolvedTheme.line)}" stroke-width="1"/>` +
+    `<rect data-chart-card="background" width="${width}" height="${height}" rx="${cornerRadius}" fill="${escapeXml(cardFill)}" stroke="${escapeXml(cardStroke)}" stroke-width="1"/>` +
     headerSvg +
     `<svg x="${plotX}" y="${plotY}" width="${plotWidth}" height="${plotHeight}" viewBox="${escapeXml(viewBox)}" preserveAspectRatio="xMidYMid meet">` +
     innerPlotSvg +

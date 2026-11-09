@@ -13,6 +13,7 @@ import {
   normalizeChartType,
   normalizeLang,
   parseDataInput,
+  resolveBackgroundColor,
   resolveChartSpec,
   resolveCornerRadius,
   sanitizeItemColors,
@@ -81,10 +82,12 @@ function sanitizePatch(rawPatch, existingProps = CHART_DEFAULTS) {
   if (rawPatch.backgroundColor !== undefined) {
     if (rawPatch.backgroundColor === '') {
       clean.backgroundColor = '';
-    } else if (!isValidHexColor(rawPatch.backgroundColor)) {
-      throw new Error('INVALID_INPUT: backgroundColor must be "" or a #rrggbb hex string');
     } else {
-      clean.backgroundColor = rawPatch.backgroundColor.trim();
+      const background = resolveBackgroundColor(rawPatch.backgroundColor);
+      if (!background) {
+        throw new Error('INVALID_INPUT: backgroundColor must be "", "transparent", or a #rrggbb hex string');
+      }
+      clean.backgroundColor = background;
     }
   }
   if (rawPatch.cornerRadius !== undefined) {
@@ -321,7 +324,7 @@ export function registerZtdChartTools(context) {
             variant: `Allowed: ${ALLOWED_VARIANTS.join(', ')}`,
             legendMode: `Allowed: ${ALLOWED_LEGENDS.join(', ')}`,
             accentColor: 'string (#rrggbb): 강조 계열 색상',
-            backgroundColor: 'string (#rrggbb or ""): 차트 카드 배경 색상',
+            backgroundColor: 'string (#rrggbb, "transparent", or ""): 차트 카드 배경 색상. transparent면 카드 배경만 투명',
             cornerRadius: 'number (0–64): 차트 카드 모서리 둥글기. 0이면 직각',
             data: 'array of row objects (비워 두면 해당 차트 유형의 내장 샘플 데이터 사용)',
             encoding: 'object: 데이터 컬럼 매핑 (예: { x, y, series } 또는 { label, value })',
