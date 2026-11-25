@@ -70,6 +70,11 @@ test('workspace.tools registers catalog, suggest, search, descriptor, and plan-c
   assert.ok(catalogRes.total >= 2);
   assert.ok(catalogRes.charts.some(c => c.type === 'sankey'));
 
+  const mapCatalog = await catalogTool.execute({ family: 'map', locale: 'en' }, {});
+  assert.deepEqual(mapCatalog.charts.map(c => c.type).sort(), ['choropleth', 'flowMap', 'symbolMap', 'tileMap']);
+  assert.ok(mapCatalog.families.some(family => family.id === 'map'));
+  assert.ok(mapCatalog.charts.every(c => c.whenToUse.length === 1 && c.whenToUse[0].length > 1));
+
   // 2. Suggest tool
   const suggestTool = tools.get(`${EXTENSION_ID}:suggest`);
   const suggestRes = await suggestTool.execute(

@@ -1,3 +1,6 @@
+import './maps.js';
+import { cmuSvgDefs } from './cmu-webfont.js';
+import { PRINT_PRESETS, parsePrintCss } from './print-style.js';
 import metadata from '../extension.json' with { type: 'json' };
 import { renderChartDom } from './dom-renderer.js';
 import { matchTextToChartData, mergeDraft, mountInlineEditor } from './inline-editor.js';
@@ -62,7 +65,7 @@ const COMMAND_LABELS = Object.freeze({
 export const ztdChartAspect = Object.freeze({
   id: CHART_ASPECT_ID,
   label: 'ZTD 차트',
-  summary: '36종의 zero-dependency 통계·비즈니스 데이터 시각화 차트 도형',
+  summary: `${CHART_TYPES.length}종의 통계·비즈니스 데이터 시각화 차트 도형`,
   layout: true,
   dependsOnCanonical: ['core.transform', 'core.bounds', CHART_ASPECT_ID],
   dependsOnComputed: [],
@@ -71,6 +74,7 @@ export const ztdChartAspect = Object.freeze({
   derive: deriveChartGeometry,
   renderDom: renderChartDom,
   renderSvg: renderChartSvg,
+  svgDefs: cmuSvgDefs,
   ui: {
     controls: [
       {
@@ -558,6 +562,14 @@ const plugin = {
         const nextOptions = { ...(current.options ?? {}) };
         const patch = {};
         let optionsChanged = false;
+        if ('stylePreset' in args) {
+          if (args.stylePreset !== '' && !PRINT_PRESETS.some(p => p.id === args.stylePreset)) return null;
+          patch.stylePreset = args.stylePreset;
+        }
+        if ('customCss' in args) {
+          if (parsePrintCss(args.customCss).error) return null;
+          patch.customCss = args.customCss;
+        }
 
         if (args.options && typeof args.options === 'object' && !Array.isArray(args.options)) {
           for (const [k, v] of Object.entries(args.options)) {

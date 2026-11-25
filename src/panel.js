@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { StudioPrint } from './studio-print.js';
+import { StudioChartSettings } from './studio-settings.js';
 import { createRoot } from 'react-dom/client';
 import { CHART_ASPECT_ID, EXTENSION_ID, STUDIO_PANEL_ID } from './manifest.js';
 import {
@@ -49,20 +51,17 @@ export function ZtdChartStudioView({ context }) {
     [selected],
   );
 
+  // Keep the original rows editable even when the renderer falls back to a sample.
+  // Compare serialized data so unrelated canvas/style updates preserve an unfinished draft.
+  const editorSource = useMemo(() => {
+    if (!resolved) return '';
+    const rows = selected.props.data?.length ? selected.props.data : resolved.spec.data;
+    return editorMode === 'csv' ? formatRowsAsCsv(rows) : JSON.stringify(rows, null, 2);
+  }, [selected, resolved, editorMode]);
   useEffect(() => {
-    if (!resolved) {
-      setDataDraft('');
-      setParseStatus(null);
-      return;
-    }
-    const rows = resolved.spec.data ?? [];
-    if (editorMode === 'csv') {
-      setDataDraft(formatRowsAsCsv(rows));
-    } else {
-      setDataDraft(JSON.stringify(rows, null, 2));
-    }
+    setDataDraft(editorSource);
     setParseStatus(null);
-  }, [selected?.id, resolved?.chartType, resolved?.usingSampleData, editorMode]);
+  }, [selected?.id, resolved?.chartType, editorMode, editorSource]);
 
   const catalog = useMemo(
     () => getChartCatalog(resolved?.lang ?? 'ko'),
@@ -162,7 +161,7 @@ export function ZtdChartStudioView({ context }) {
         React.createElement(
           'div',
           { style: { fontWeight: 700, fontSize: '13px' } },
-          'ZTD 차트 스튜디오 (36종)',
+          `ZTD 차트 스튜디오 (${catalog.length}종)`,
         ),
         React.createElement(
           'div',
@@ -195,6 +194,7 @@ export function ZtdChartStudioView({ context }) {
     // Category filter & search
     React.createElement('input', {
       type: 'search',
+      'aria-label': '차트 검색',
       value: searchQuery,
       onChange: e => setSearchQuery(e.target.value),
       placeholder: '차트 검색 (예: 막대, 라인, 생키, 퍼널, 캔들스틱…)',
@@ -225,6 +225,7 @@ export function ZtdChartStudioView({ context }) {
           {
             key: fam.id,
             type: 'button',
+            'aria-pressed': familyFilter === fam.id,
             onClick: () => setFamilyFilter(fam.id),
             style: {
               padding: '3px 8px',
@@ -242,8 +243,11 @@ export function ZtdChartStudioView({ context }) {
       ),
     ),
 
-    // 36 chart types grid
-    React.createElement(
+    React.createElement('div', { role: 'status' }, filteredCatalog.length
+      ? `차트 ${filteredCatalog.length}종 · ${selected ? '선택하면 현재 차트 유형을 변경합니다' : '선택하면 새 차트를 추가합니다'}`
+      : '조건에 맞는 차트가 없습니다. 검색어나 분류를 바꿔 보세요.'),
+    // Catalog grid
+    filteredCatalog.length > 0 && React.createElement(
       'div',
       {
         style: {
@@ -264,6 +268,7 @@ export function ZtdChartStudioView({ context }) {
             type: 'button',
             onClick: () => handleCreateOrSwitchType(item.type),
             title: item.summary,
+            'aria-pressed': isActive,
             style: {
               textAlign: 'left',
               padding: '6px 8px',
@@ -306,6 +311,21 @@ export function ZtdChartStudioView({ context }) {
       ? React.createElement(
           React.Fragment,
           null,
+          resolved.usingSampleData && selected.props.data?.length > 0 && React.createElement(
+            'p', { role: 'status' }, '입력한 열이 이 차트와 맞지 않아 샘플을 표시합니다. 데이터 열 안내에서 필요한 형식을 확인하세요.',
+          ),
+          React.createElement(StudioPrint, {
+            key: JSON.stringify([selected.id, selected.props.customCss]),
+            chartType: resolved.chartType, stylePreset: selected.props.stylePreset, customCss: selected.props.customCss,
+            update: patch => void context.executeCommand(`${EXTENSION_ID}:update-style`, { entityId: selected.id, ...patch }),
+          }),
+          React.createElement(StudioChartSettings, {
+            resolved,
+            storedOptions: selected.props.options,
+            onOption: (name, value) => void context.executeCommand(`${EXTENSION_ID}:update-style`, {
+              entityId: selected.id, options: { [name]: value },
+            }),
+          }),
           recommendations.length > 0 &&
             React.createElement(
               'div',

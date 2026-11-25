@@ -2,6 +2,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Chart, ThemeProvider, baseCss, themeToCss } from 'ztd-charts';
 import { DEFAULT_CHART_HEIGHT, DEFAULT_CHART_WIDTH, resolveChartSpec, resolveColorForZtdKey } from './model.js';
+import { cmuFontCss } from './cmu-webfont.js';
+import { createPrintProof } from './print-proof.js';
 import { renderChartSvg } from './svg-renderer.js';
 
 const mountedRoots = new WeakMap();
@@ -16,7 +18,10 @@ function ensureDocumentBaseCss(doc) {
       const style = doc.createElement('style');
       style.id = 'ztd-charts-extension-css';
       style.textContent = [
+        cmuFontCss,
         baseCss,
+        '[data-role="ztd-chart-mount"] .ztd-card > header ul[aria-label] { box-sizing:border-box;max-width:100%;padding:4px 7px !important;border:1px solid var(--ztd-dim);background:var(--ztd-panel); }',
+        '[data-role="ztd-chart-mount"] .ztd-card > header ul[aria-label] li { min-width:0;overflow-wrap:anywhere; }',
         '[data-role="ztd-chart-mount"] .ztd-card { height: 100%; box-sizing: border-box; margin: 0; }',
         '[data-ztd-card-background="transparent"] .ztd-card { background: transparent !important; border-color: transparent !important; box-shadow: none !important; }',
         '[data-role="ztd-chart-mount"] [data-chart-field], [data-role="ztd-chart-mount"] [data-chart-option-field] { pointer-events: auto !important; cursor: text !important; }',
@@ -341,43 +346,55 @@ export function renderChartDom(hostEl, props, derived, entityId = 'chart') {
     if (transparentCard) hostEl.dataset.ztdCardBackground = 'transparent';
     else delete hostEl.dataset.ztdCardBackground;
   }
-  if (hostEl.style) {
-    hostEl.style.cssText =
-      `${themeVars};width:100%;height:${height}px;box-sizing:border-box;position:relative;overflow:hidden;` +
-      `border-radius:${resolved.cornerRadius}px;` +
-      `background:${transparentCard ? 'transparent' : (resolved.backgroundColor || resolvedTheme.panel)};` +
-      `border:1px solid ${transparentCard ? 'transparent' : resolvedTheme.line};` +
-      `color:${resolvedTheme.ink};font-family:${resolvedTheme.fontFamily};user-select:none;`;
-  }
-
   const doc = hostEl.ownerDocument;
-  if (!doc || typeof doc.createElement !== 'function') {
+  ensureDocumentBaseCss(doc);
+  // Print view uses the publication SVG itself (no animated or hover-only marks).
+  if (resolved.printStyle || !doc || typeof doc.createElement !== 'function') {
+    const oldRoot = mountedRoots.get(hostEl);
+    if (oldRoot) {
+      oldRoot.root.unmount();
+      mountedRoots.delete(hostEl);
+    }
     const { svg } = renderChartSvg(props, { ...geom, x: 0, y: 0, rotation: 0 }, entityId);
-    hostEl.innerHTML = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">${svg}</svg>`;
+    const vector = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">${svg}</svg>`;
+    if (doc?.createElement && resolved.printStyle) {
+      const proof = createPrintProof(doc, svg, width, height, title, localeTag);
+      hostEl.replaceChildren(proof);
+    } else {
+      hostEl.innerHTML = vector;
+    }
+    const rendered = hostEl.firstChild;
     return () => {
-      hostEl.innerHTML = '';
+      if (hostEl.firstChild === rendered) hostEl.innerHTML = '';
     };
   }
-
-  ensureDocumentBaseCss(doc);
 
   let entry = mountedRoots.get(hostEl);
   if (!entry || !hostEl.contains?.(entry.mountNode)) {
     const mountNode = doc.createElement('div');
     mountNode.dataset.role = 'ztd-chart-mount';
-    mountNode.style.cssText = 'width:100%;height:100%;box-sizing:border-box;display:flex;flex-direction:column;justify-content:stretch;';
     hostEl.replaceChildren(mountNode);
     const root = createRoot(mountNode);
     entry = { root, mountNode, gen: 0 };
     mountedRoots.set(hostEl, entry);
   }
 
+  // Alid owns the shared content element's width, transform and transform-origin.
+  // Style only our child, in unscaled world units (the wrapper is already zoomed).
+  entry.mountNode.style.cssText =
+    `${themeVars};width:${width}px;height:${height}px;` +
+    'box-sizing:border-box;position:relative;overflow:hidden;display:flex;flex-direction:column;' +
+    `border-radius:${resolved.cornerRadius}px;` +
+    `background:${transparentCard ? 'transparent' : (resolved.backgroundColor || resolvedTheme.panel)};` +
+    `border:1px solid ${transparentCard ? 'transparent' : resolvedTheme.line};` +
+    `color:${resolvedTheme.ink};font-family:${resolvedTheme.fontFamily};user-select:none`;
+
   const hasSubtitle = variant === 'card' && Boolean(resolved.subtitle);
   const hasLegend = variant === 'card' && legendItems.length > 0;
   const hasTakeaway = variant === 'card' && Boolean(resolved.takeaway);
   const hasCardNumber = variant === 'card' && Boolean(cardNumber);
   const chromeHeight = variant === 'card'
-    ? (hasCardNumber ? 68 : 48) + (hasSubtitle ? 20 : 0) + (hasLegend ? 24 : 0) + (hasTakeaway ? 34 : 0)
+    ? (hasCardNumber ? 68 : 48) + (hasSubtitle ? 20 : 0) + (hasLegend ? 32 : 0) + (hasTakeaway ? 34 : 0)
     : 24;
   const plotHeight = Math.max(96, height - chromeHeight);
   const plotWidth = Math.max(140, width - (variant === 'card' ? 40 : 24));
@@ -409,7 +426,7 @@ export function renderChartDom(hostEl, props, derived, entityId = 'chart') {
       if (!current) return;
       if (current.gen === renderGen || !hostEl.contains?.(current.mountNode)) {
         try {
-          current.root.unmount();
+          if (mountedRoots.get(hostEl) === current) current.root.unmount();
         } catch {
           // Ignore unmount errors on detached hosts
         }

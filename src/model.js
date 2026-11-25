@@ -1,3 +1,5 @@
+import { CHART_FONT } from './chart-fonts.js';
+import { resolvePrintStyle } from './print-style.js';
 import { autoLegend, luminance, mixHex, normalizeData, parseColor, parseCSV, resolveThemeInput, toCSV } from 'ztd-charts';
 import {
   CHARTS,
@@ -25,6 +27,7 @@ export const CHART_FAMILIES = Object.freeze([
   { id: 'distribution', labelKo: '분포', labelEn: 'Distribution' },
   { id: 'flow', labelKo: '흐름', labelEn: 'Flow' },
   { id: 'hierarchy', labelKo: '계층', labelEn: 'Hierarchy' },
+  { id: 'map', labelKo: '지도', labelEn: 'Map' },
   { id: 'kpi', labelKo: 'KPI', labelEn: 'KPI' },
 ]);
 
@@ -45,6 +48,8 @@ export const QUICK_CHART_OPTIONS = Object.freeze([
 
 export const CHART_DEFAULTS = Object.freeze({
   chartType: 'bar',
+  stylePreset: '',
+  customCss: '',
   title: '',
   subtitle: '',
   takeaway: '',
@@ -98,38 +103,20 @@ export function resolveCornerRadius(value) {
   return Math.min(64, Math.round(n));
 }
 
-const CATALOG_CACHE = {
-  ko: Object.freeze(
-    chartsIn('ko').map(def => {
-      const canonical = getChartDef(def.type);
-      return Object.freeze({
-        type: def.type,
-        family: canonical?.family || canonical?.group || 'comparison',
-        name: def.name,
-        summary: def.summary || def.whenToUse?.[0] || '',
-        whenToUse: Object.freeze([...(def.whenToUse ?? [])]),
-        avoidWhen: Object.freeze([...(def.avoidWhen ?? [])]),
-        encodings: Object.freeze({ ...(def.example?.encoding ?? {}) }),
-        example: def.example,
-      });
-    }),
-  ),
-  en: Object.freeze(
-    chartsIn('en').map(def => {
-      const canonical = getChartDef(def.type);
-      return Object.freeze({
-        type: def.type,
-        family: canonical?.family || canonical?.group || 'comparison',
-        name: def.name,
-        summary: def.summary || def.whenToUse?.[0] || '',
-        whenToUse: Object.freeze([...(def.whenToUse ?? [])]),
-        avoidWhen: Object.freeze([...(def.avoidWhen ?? [])]),
-        encodings: Object.freeze({ ...(def.example?.encoding ?? {}) }),
-        example: def.example,
-      });
-    }),
-  ),
-};
+function buildCatalog(lang) {
+  return Object.freeze(chartsIn(lang).map(def => Object.freeze({
+    type: def.type,
+    family: def.group,
+    name: def.name,
+    summary: def.summary,
+    whenToUse: Object.freeze(def.useWhen ? [def.useWhen] : []),
+    avoidWhen: Object.freeze(def.avoidWhen ? [def.avoidWhen] : []),
+    encodings: Object.freeze({ ...(def.example?.encoding ?? {}) }),
+    example: def.example,
+  })));
+}
+
+const CATALOG_CACHE = { ko: buildCatalog('ko'), en: buildCatalog('en') };
 
 export function normalizeLang(locale) {
   if (typeof locale === 'string' && locale.toLowerCase().startsWith('en')) return 'en';
@@ -170,7 +157,7 @@ export function resolveChartTheme(
   const baseName = parsedBg
     ? (luminance(parsedBg) < 0.28 ? 'dark' : 'light')
     : (theme === 'dark' ? 'dark' : 'light');
-  const baseTheme = resolveThemeInput(baseName);
+  const baseTheme = { ...resolveThemeInput(baseName), fontFamily: CHART_FONT, monoFamily: CHART_FONT };
 
   const customTokens = {};
   if (validAccent) {
@@ -942,10 +929,15 @@ export function resolveChartSpec(rawProps = {}) {
   };
 
   let legendItems = [];
+  let legendKeys = [];
+  let legendPrintColors = [];
   if (variant === 'card' && legendMode !== 'false') {
     try {
       const computed = autoLegend(baseSpecForLegend, effectiveRows, localeTag);
       if (Array.isArray(computed)) {
+        legendPrintColors = computed.map((item, idx) => chartType === 'candlestick' && idx < 2
+          ? ['accent', 'neutralStrong'][idx] : item.color);
+        legendKeys = computed.map(item => String(item?.label ?? ''));
         legendItems = computed.map((item, idx) => {
           const baseLabel = String(item?.label ?? '');
           const override = textOverrides[`legend:${idx}`] ?? textOverrides[`text:${baseLabel}`];
@@ -1024,6 +1016,8 @@ export function resolveChartSpec(rawProps = {}) {
     textOverrides,
     usingSampleData,
     spec,
+    legendKeys, legendPrintColors,
+    printStyle: resolvePrintStyle(rawProps.stylePreset, rawProps.customCss),
     bareSpec: {
       type: chartType,
       data: effectiveRows,

@@ -51,7 +51,7 @@
       ]
     }
   ],
-  "version": "0.1.8",
+  "version": "0.2.9",
   "engine": "^0.1.1",
   "dependencies": {},
   "optionalDependencies": {},
@@ -64,9 +64,9 @@
     "hsmSlots": []
   },
   "title": "ZTD 차트",
-  "summary": "36종의 zero-dependency 통계·비즈니스 차트를 캔버스 도형, 정적 SVG, 데이터 스튜디오 패널 및 코파일럿 도구로 제공하는 확장",
+  "summary": "47종의 zero-dependency 통계·비즈니스 차트를 캔버스 도형, 정적 SVG, 데이터 스튜디오 패널 및 코파일럿 도구로 제공하는 확장",
   "entry": "dist/plugin.js",
-  "sha256": "bb9acaf363b644cf1b2c82f2a42f8aad4d6b236e8ef23e089ce7c4e77eea3fc4",
+  "sha256": "99781d73ed6c8ecde4b0fc663074359720b4965b0ccac9bb066480f4981b9772",
   "aspectIds": [
     "diagram.ztd-charts.chart"
   ],

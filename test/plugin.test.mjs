@@ -47,8 +47,8 @@ function createMockWorld() {
   };
 }
 
-test('all 36 ztd-charts types compile to deterministic, pure vector SVG without foreignObject or NaN', () => {
-  assert.equal(CHART_TYPES.length, 36);
+test('all catalogued ztd-charts types compile to deterministic, pure vector SVG without foreignObject or NaN', () => {
+  assert.equal(CHART_TYPES.length, 47);
   const geom = { x: 40, y: 60, width: 480, height: 340, rotation: 0 };
 
   for (const chartType of CHART_TYPES) {
@@ -65,7 +65,8 @@ test('all 36 ztd-charts types compile to deterministic, pure vector SVG without 
     assert.equal(first.svg, second.svg, `SVG output for ${chartType} must be deterministic`);
     assert.ok(first.svg.startsWith('<g transform="translate(40,60)"'), `${chartType} outer transform`);
     assert.ok(first.svg.includes(`data-chart-type="${chartType}"`), `${chartType} data attribute`);
-    assert.ok(!first.svg.includes('foreignObject'), `${chartType} must not use foreignObject`);
+    assert.doesNotMatch(first.svg, /<(?:foreignObject|div|button|table|input|span)\b/i, chartType);
+    assert.match(first.svg, /<svg\b[^>]*>[\s\S]*?<(?:path|rect|circle|polygon)\b/, `${chartType} sample must draw data marks`);
     assert.ok(!first.svg.includes('NaN'), `${chartType} must not contain NaN`);
     assert.ok(!first.svg.includes('var(--ztd-'), `${chartType} must inline --ztd-* CSS variables`);
   }
@@ -141,6 +142,14 @@ test('plugin commands create, switch type, update data, apply suggestions, and t
   assert.deepEqual(selected, [chartId]);
   assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).chartType, 'bar');
   assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).title, '매출 현황');
+
+  const original = world.getCanonical(chartId, CHART_ASPECT_ID);
+  runtime.api.updateStyle({ stylePreset: 'bars', customCss: '--exam-font: serif' });
+  assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).stylePreset, 'bars');
+  assert.equal(runtime.api.updateStyle({ stylePreset: 'energy', customCss: 'body { color: red }' }), null);
+  assert.equal(world.getCanonical(chartId, CHART_ASPECT_ID).stylePreset, 'bars');
+  runtime.api.updateStyle({ stylePreset: '', customCss: '' });
+  assert.deepEqual(world.getCanonical(chartId, CHART_ASPECT_ID), original);
 
   // Switch chart type
   runtime.api.setChartType({ chartType: 'line' });

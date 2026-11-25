@@ -313,7 +313,7 @@ export function registerZtdChartTools(context) {
         tools.registerDescriptor({
           aspect: CHART_ASPECT_ID,
           description:
-            'ZTD 36종 통계·비즈니스 차트 도형. 생성·수정·이동·삭제는 반드시 plan-changes 도구를 통해 사용자 승인 제안(prepareChange)으로만 수행하세요.',
+            `ZTD ${CHART_TYPES.length}종 통계·비즈니스 차트 도형. 생성·수정·이동·삭제는 반드시 plan-changes 도구를 통해 사용자 승인 제안(prepareChange)으로만 수행하세요.`,
           fields: {
             chartType: `Allowed (${CHART_TYPES.length} types): ${CHART_TYPES.join(', ')}`,
             title: 'string: 차트 카드 제목 (비워 두면 차트 유형별 기본 제목 사용)',
@@ -337,7 +337,7 @@ export function registerZtdChartTools(context) {
 
     registerTool(
       'catalog',
-      'ZTD 차트 36종 카탈로그 및 용도·권장 인코딩 조회 (읽기 전용).',
+      `ZTD 차트 ${CHART_TYPES.length}종 카탈로그 및 용도·권장 인코딩 조회 (읽기 전용).`,
       {
         family: { type: 'string' },
         query: { type: 'string' },

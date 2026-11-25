@@ -1,2 +1,3 @@
-minimumReleaseAgeExclude:
-  - ztd-charts@0.5.0
+minimumReleaseAgeExclude: []
+patchedDependencies:
+  ztd-charts@0.13.1: patches/ztd-charts@0.13.1.patch

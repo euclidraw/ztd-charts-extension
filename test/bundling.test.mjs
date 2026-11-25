@@ -28,7 +28,8 @@ test('SDK and React imports stay external and resolve through the host shared mo
   const output = await bundle(`${imports}\nexport default [${sharedImports.map((_, index) => `shared${index}`).join(',')}];`);
   assert.equal(output.length, 1);
   assert.deepEqual([...output[0].imports].sort(), [...sharedImports].sort());
-  assert.ok(output[0].code.length < 4000);
+  const executable = output[0].code.replace(/^\s*\/\*![\s\S]*?\*\//, '');
+  assert.ok(executable.length < 4000);
 });
 
 test('built dist/plugin.js only imports from host sharedImports and patches ztd-charts zoom rect helpers', async () => {
@@ -37,6 +38,8 @@ test('built dist/plugin.js only imports from host sharedImports and patches ztd-
   for (const spec of staticImports) {
     assert.ok(sharedImports.includes(spec), `Unexpected external import "${spec}" in dist/plugin.js`);
   }
+  assert.ok(!code.includes('c.node.getBoundingClientRect().width / c.width'), 'tooltip must use unscaled layout width');
+  assert.ok(!code.includes('svgRect.current = e.currentTarget.getBoundingClientRect()'), 'pointer coordinates must use live bounds');
   assert.ok(!code.includes('__require("react")'), 'dist/plugin.js must not emit CommonJS require("react")');
   assert.ok(
     code.includes('el.clientWidth || el.getBoundingClientRect().width'),

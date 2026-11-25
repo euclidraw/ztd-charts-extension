@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 
@@ -31,7 +32,7 @@ export function ztdChartsCanvasZoomPatch() {
   return {
     name: 'ztd-charts-canvas-zoom-patch',
     transform(code, id) {
-      if (!id.includes('ztd-charts')) return null;
+      if (!id.includes('/node_modules/ztd-charts/')) return null;
       let next = code.replace(/^"use client";\s*/m, '');
       // 1. Responsive container width: prefer unscaled layout width (clientWidth) over screen-transformed getBoundingClientRect().width
       next = next.replace(
@@ -40,8 +41,8 @@ export function ztdChartsCanvasZoomPatch() {
       );
       // 2. Tooltip offset scale: avoid multiplying tooltip position by camera.zoom a second time
       next = next.replace(
-        'const scale = c && c.width > 0 ? c.node.getBoundingClientRect().width / c.width || 1 : 1;',
-        'const scale = c && c.width > 0 ? (c.node.clientWidth || c.width) / c.width || 1 : 1;',
+        'c.node.getBoundingClientRect().width / c.width || 1',
+        '(c.node.clientWidth || c.width) / c.width',
       );
       // 3. Pointer-to-SVG viewBox conversion: always read live rect in case canvas panned/zoomed while hovering
       next = next.replace(
@@ -69,6 +70,8 @@ export default defineConfig({
       external: isSharedImport,
       output: {
         codeSplitting: false,
+        // The installer distributes just the bundle, including the map boundaries.
+        banner: '/*!\n' + readFileSync(new URL('./docs/third-party-notices.md', import.meta.url), 'utf8') + '\n*/',
       },
     },
   },

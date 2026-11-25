@@ -1,0 +1,132 @@
+diff --git a/dist/index.js b/dist/index.js
+index ebcf7e6187e5ed5584ba14bca2ac29fc730762b4..2bb652d47738ab78357d7348a472b085ffb14e02 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -3639,7 +3639,7 @@ function PieBase(props) {
+       /* @__PURE__ */ jsx11(Txt, { x: cx, y: cy - (props.centerLabel ? 7 : 0), anchor: "middle", size: Math.max(15, Math.min(26, r0 * 0.42)), weight: 800, fill: p.paint("ink"), letterSpacing: -0.4, children: c.fmt(Math.round(center)) }),
+       props.centerLabel ? /* @__PURE__ */ jsx11(Txt, { x: cx, y: cy + Math.max(11, Math.min(17, r0 * 0.3)), anchor: "middle", size: capSize, fill: p.paint("muted"), children: truncate(props.centerLabel, r0 * 1.6, capSize) }) : null
+     ] }) : null,
+-    legendMode === "right" || legendMode === "bottom" ? /* @__PURE__ */ jsx11("g", { children: slices.map((s, k) => {
++    legendMode === "right" || legendMode === "bottom" ? /* @__PURE__ */ jsx11("g", { children: [slices.length ? (legendMode === "right" ? legendFrame(p, plotW + 2, cy - (slices.length - 1) * legendRowH / 2 - 11, legendW - 2, (slices.length - 1) * legendRowH + 22) : legendFrame(p, 0, plotH, W, bottomH)) : null, slices.map((s, k) => {
+       const right = legendMode === "right";
+       const colW = right ? legendW - 12 : (W - 36) / 2;
+       const lx = right ? plotW + 8 : 8 + k % 2 * (colW + 20);
+@@ -3652,7 +3652,7 @@ function PieBase(props) {
+         /* @__PURE__ */ jsx11(Txt, { x: lx + 16, y: ly, size: 12, weight: s.hi ? 700 : 500, fill: p.paint(s.hi ? "ink" : "muted"), children: truncate(s.label, nameMax, 12, s.hi ? 700 : 500) }),
+         /* @__PURE__ */ jsx11(Txt, { x: lx + colW, y: ly, anchor: "end", size: 12, weight: s.hi ? 800 : 500, fill: p.paint(s.hi ? "ink" : "muted"), children: pct })
+       ] }, s.i);
+-    }) }) : null
++    })] }) : null
+   ] });
+ }
+ function centerNumber(props, slices, total) {
+@@ -5040,13 +5040,20 @@ function CanvasLayer(props) {
+ 
+ // src/core/scaleLegend.tsx
+ import { jsx as jsx20, jsxs as jsxs17 } from "react/jsx-runtime";
++// Alid: use the same vector frame in interactive charts and headless publication.
++function legendFrame(p, x, y, width, height) {
++  if (!(width > 1 && height > 1)) return null;
++  return jsx("rect", { "data-chart-legend-frame": "true", x: x + 0.5, y: y + 0.5, width: width - 1, height: height - 1, fill: p.paint("panel"), stroke: p.paint("ink"), strokeWidth: 1, pointerEvents: "none" }, "legend-frame");
++}
+ function scaleLegendWidth(steps, labels) {
+   return textWidth(labels[0], 10) + 10 + steps * 14 + textWidth(labels[1], 10);
+ }
+-function ScaleLegend({ p, right, steps, scale, labels, min }) {
++function ScaleLegend({ p, right, steps, scale, labels, min, extraWidth = 0 }) {
++  right -= 4;
+   const center = scale.center;
+   const start = right - steps * 14 - textWidth(labels[1], 10);
+   return /* @__PURE__ */ jsxs17("g", { "aria-hidden": "true", children: [
++    legendFrame(p, right - scaleLegendWidth(steps, labels) - extraWidth - 4, 0, scaleLegendWidth(steps, labels) + extraWidth + 8, 16),
+     Array.from({ length: steps }, (_, k) => {
+       const s = scaleSwatch(p, center === void 0 ? k / (steps - 1) : 2 * k / (steps - 1) - 1, min, scale);
+       return /* @__PURE__ */ jsx20("rect", { x: start - 6 + k * 14, y: 3, width: 12, height: 9, rx: 2, fill: s.fill, opacity: s.opacity }, k);
+@@ -8404,6 +8411,7 @@ function DumbbellChart(props) {
+         /* @__PURE__ */ jsx34("line", { x1: x(t), x2: x(t), y1: top - 4, y2: H - bottom, stroke: p.paint("line") }),
+         /* @__PURE__ */ jsx34(Txt, { x: x(t), y: H - bottom + 10, anchor: "middle", size: AXIS_FONT, fill: p.paint("muted"), children: c.fmt(t) })
+       ] }, t)),
++      legendFrame(p, labelW + 4, 0, Math.min(W - labelW - 4, 42 + textWidth(names[0], 10.5) + textWidth(names[1], 10.5)), 17),
+       /* @__PURE__ */ jsx34("circle", { cx: labelW + 14, cy: 8, r: 4, fill: p.paint("neutralStrong") }),
+       /* @__PURE__ */ jsx34(Txt, { x: labelW + 22, y: 8, size: 10.5, fill: p.paint("muted"), children: names[0] }),
+       /* @__PURE__ */ jsx34("circle", { cx: labelW + 32 + textWidth(names[0], 10.5), cy: 8, r: 4.5, fill: p.paint("ink") }),
+@@ -10426,12 +10434,13 @@ function SegmentedBar(props) {
+         fits ? /* @__PURE__ */ jsx45(Txt, { x: x + 8, y: top + barH / 2, size: 11, weight: 700, fill: q.sw.text, opacity: m.fade(k * stg + 300, 240), children: q.pct }) : null
+       ] }, it.key);
+     }),
++    withList && parts.length ? legendFrame(p, 0, listTop - ROW_H / 2, W, Math.ceil(parts.length / cols) * ROW_H) : null,
+     withList ? parts.map((q, k) => {
+       const col = k % cols;
+       const row = Math.floor(k / cols);
+-      const x = col * colW;
++      const x = col * colW + 5;
+       const y = listTop + row * ROW_H;
+-      const right = x + colW - (cols > 1 && col === 0 ? 16 : 0);
++      const right = x + colW - 10 - (cols > 1 && col === 0 ? 16 : 0);
+       const shareText = q.pct;
+       const valueText = c.fv(q.value);
+       const shareW = textWidth(shareText, 11.5, 500);
+@@ -10749,7 +10758,7 @@ function SkylineChart(props) {
+   const showStrip = strip && hasFront;
+   const frontLabel = hasFront && !strip && c.showLabels;
+   const legendItems = useMemo39(() => nB > 1 || hasFront ? all.map((name, j) => ({ name, divider: j === nB && nB > 0 })) : [], [all, nB, hasFront]);
+-  const legendAt = useMemo39(() => legendPlaces(legendItems, W), [legendItems, W]);
++  const legendAt = useMemo39(() => legendPlaces(legendItems, W - 8), [legendItems, W]);
+   const legendH = legendAt.length ? (legendAt[legendAt.length - 1].line + 1) * LEGEND_LINE + 6 : 0;
+   const below = SLAB + (showStrip ? 70 : frontLabel ? 48 : 22);
+   const L = useMemo39(
+@@ -10961,7 +10970,8 @@ function SkylineChart(props) {
+       },
+       defs: texture !== "none" ? /* @__PURE__ */ jsx46("pattern", { id: `${uid}h`, width: 4, height: 4, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)", children: /* @__PURE__ */ jsx46("rect", { width: 1.6, height: 4, fill: p.paint("panel"), fillOpacity: 0.55 }) }) : void 0,
+       children: [
+-        /* @__PURE__ */ jsx46("g", { "aria-hidden": "true", children: legendItems.map((it, j) => {
++        legendItems.length ? legendFrame(p, 0, 0, W, legendH - 3) : null,
++        /* @__PURE__ */ jsx46("g", { transform: "translate(4 0)", "aria-hidden": "true", children: legendItems.map((it, j) => {
+           const { x, line } = legendAt[j];
+           const y = line * LEGEND_LINE + 9;
+           const front = j >= nB;
+@@ -14195,8 +14205,8 @@ function Choropleth(props) {
+       children: [
+         missingMap ? /* @__PURE__ */ jsx54(Txt, { x: W / 2, y: H / 2, anchor: "middle", size: 12, fill: p.paint("muted"), children: truncate(msg.notLoaded(missingMap), W - 16, 12) }) : null,
+         props.legend !== false && n ? /* @__PURE__ */ jsxs50("g", { children: [
+-          /* @__PURE__ */ jsx54(ScaleLegend, { p, right: mapW, steps, scale, labels: ll, min: MIN_OPACITY4 }),
+-          Array.from({ length: steps }, (_, k) => /* @__PURE__ */ jsx54("rect", { x: stepStart - 7 + k * 14, y: 0, width: 14, height: 16, fill: "transparent", onPointerEnter: () => setStep(k), onPointerLeave: () => setStep(null) }, k)),
++          /* @__PURE__ */ jsx54(ScaleLegend, { p, right: mapW, steps, scale, labels: ll, min: MIN_OPACITY4, extraWidth: noDataW ? noDataW + 16 : 0 }),
++          Array.from({ length: steps }, (_, k) => /* @__PURE__ */ jsx54("rect", { x: stepStart - 11 + k * 14, y: 0, width: 14, height: 16, fill: "transparent", onPointerEnter: () => setStep(k), onPointerLeave: () => setStep(null) }, k)),
+           noDataW ? /* @__PURE__ */ jsxs50("g", { "aria-hidden": "true", children: [
+             /* @__PURE__ */ jsx54("rect", { x: mapW - lw - 14 - noDataW, y: 3, width: 12, height: 9, rx: 2, fill: p.paint("neutralSoft"), stroke: p.paint("line2"), strokeWidth: 0.5 }),
+             /* @__PURE__ */ jsx54(Txt, { x: mapW - lw - 14 - noDataW + 16, y: 7.5, size: 10, fill: p.paint("muted"), children: msg.noData })
+@@ -14665,6 +14675,7 @@ function SymbolMap(props) {
+           /* @__PURE__ */ jsxs51("g", { clipPath: layout.clip ? `url(#${uid}c)` : void 0, children: [
+             layout.context.length ? /* @__PURE__ */ jsx56(BaseMap, { p, frame, regions: layout.context, opacity: 0.6 }) : null,
+             /* @__PURE__ */ jsx56(BaseMap, { p, frame, regions: layout.regions }),
++            legend ? legendFrame(p, Math.max(0, legend.x0 - 3), Math.max(0, legend.y0 - 6), legend.bw + 6, legend.bh + 10) : null,
+             legend ? /* @__PURE__ */ jsx56("g", { "aria-hidden": "true", pointerEvents: "none", children: legend.items.map((it, k) => /* @__PURE__ */ jsxs51("g", { children: [
+               /* @__PURE__ */ jsx56("circle", { cx: legend.x0 + legend.R, cy: legend.y0 + legend.bh - it.r, r: it.r, fill: "none", stroke: p.paint("muted"), strokeWidth: 0.8 }),
+               /* @__PURE__ */ jsx56("line", { x1: legend.x0 + legend.R, x2: legend.x0 + 2 * legend.R + 3, y1: legend.y0 + legend.bh - 2 * it.r, y2: legend.y0 + legend.bh - 2 * it.r, stroke: p.paint("muted"), strokeWidth: 0.6, strokeDasharray: "2 2" }),
+@@ -15507,7 +15518,7 @@ function HorizonChart(props) {
+   useEffect12(() => {
+     if (c.active === null) setTime(null);
+   }, [c.active]);
+-  const legend = placeLegend(entries, W);
++  const legend = placeLegend(entries, W - 8);
+   const top = topOf(legend.lines);
+   const rowH = props.height === void 0 || !nS ? rowH0 : Math.max(2, (H - top - AXIS_H2 - (nS - 1) * GAP3) / nS);
+   const rowTop = (s) => top + s * (rowH + GAP3);
+@@ -15600,7 +15611,7 @@ function HorizonChart(props) {
+     const loE = ends.reduce((a, b) => b.v < a.v ? b : a);
+     desc += msg.ends(display(hiE.s), fv(hiE.v), display(loE.s), fv(loE.v));
+   }
+-  const legendLayer = legendOn ? /* @__PURE__ */ jsx59("g", { "aria-hidden": "true", children: entries.map((e, i) => {
++  const legendLayer = legendOn ? /* @__PURE__ */ jsx59("g", { transform: "translate(4 0)", "aria-hidden": "true", children: entries.map((e, i) => {
+     const { x, line, sx } = legend.at[i];
+     const y = line * LEGEND_LINE2 + 9;
+     return /* @__PURE__ */ jsxs54("g", { children: [
+@@ -15646,6 +15657,7 @@ function HorizonChart(props) {
+       },
+       defs: nS ? names.map((_, s) => /* @__PURE__ */ jsx59("clipPath", { id: `${gid}c${s}`, children: /* @__PURE__ */ jsx59("rect", { x: r14(x0), y: r14(rowTop(s)), width: r14((x1 - x0) * (shown.get(s) ?? 1)), height: r14(rowH) }) }, s)) : void 0,
+       children: [
++        legendOn && entries.length ? legendFrame(p, 0, 0, W, top - 5) : null,
+         legendLayer,
+         bandLayer,
+         c.active !== null && c.active < nS ? /* @__PURE__ */ jsx59("rect", { x: r14(x0 - 1.5), y: r14(rowTop(c.active) - 1.5), width: r14(x1 - x0 + 3), height: r14(rowH + 3), rx: 3, fill: "none", stroke: p.paint("ink"), pointerEvents: "none" }) : null,

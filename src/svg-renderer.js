@@ -1,5 +1,7 @@
 import React from 'react';
-import { Chart, ThemeProvider, textWidth } from 'ztd-charts';
+import { createPrintMarks } from './print-marks.js';
+import { printTheme } from './print-style.js';
+import { Chart, ThemeProvider, mixHex, textWidth } from 'ztd-charts';
 import { DEFAULT_CHART_HEIGHT, DEFAULT_CHART_WIDTH, resolveChartSpec, resolveColorForZtdKey } from './model.js';
 
 const SVG_CAMEL_ATTRS = new Set([
@@ -55,7 +57,7 @@ const UNITLESS_CSS_PROPS = new Set([
 ]);
 
 export function escapeXml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, ch => (
+  return String(value ?? '').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '\uFFFD').replace(/[&<>"']/g, ch => (
     ch === '&'
       ? '&amp;'
       : ch === '<'
@@ -108,6 +110,7 @@ function getReactInternals() {
 export function renderStaticElement(rootElement, idPrefix = 'ztd', colorContext = null) {
   const internals = getReactInternals();
   let idCounter = 0;
+  let parent = null;
 
   function renderComponent(Component, props, contextMap, activeColor, inheritedKey) {
     const dispatcher = {
@@ -218,6 +221,7 @@ export function renderStaticElement(rootElement, idPrefix = 'ztd', colorContext 
           }
         }
 
+        const tag = colorContext?.print?.decorate(type, rest, ownKey, parent) ?? type;
         let attrString = '';
         if (ownKey) {
           attrString += ` data-ztd-key="${escapeXml(ownKey)}"`;
@@ -241,10 +245,13 @@ export function renderStaticElement(rootElement, idPrefix = 'ztd', colorContext 
           const css = serializeStyleObject(style);
           if (css) attrString += ` style="${escapeXml(css)}"`;
         }
+        const previousParent = parent;
+        if (colorContext?.print) parent = { key: ownKey, markKey: isMark ? ownKey : previousParent?.markKey, mark: isMark, hidden: rest['aria-hidden'] === 'true', circles: 0 };
         const inner = dangerouslySetInnerHTML?.__html !== undefined
           ? String(dangerouslySetInnerHTML.__html)
           : walk(children, contextMap, effectiveColor, '');
-        return `<${type}${attrString}>${inner}</${type}>`;
+        parent = previousParent;
+        return `<${tag}${attrString}>${inner}</${tag}>`;
       }
     }
     return '';
@@ -304,12 +311,43 @@ function applySvgTextOverrides(svgContent, textOverrides) {
     const plainBase = unescapeXml(inner.replace(/<[^>]+>/g, '')).trim();
     const override = textOverrides?.[slotKey] ?? (plainBase ? textOverrides?.[`text:${plainBase}`] : undefined);
     const nextInner = override !== undefined ? escapeXml(String(override)) : inner;
-    return `<text data-chart-text-slot="${slotKey}"${attrs}>${nextInner}</text>`;
+    const label = unescapeXml(nextInner.replace(/<[^>]+>/g, ''));
+    const hatched = attrs.includes(' data-on-hatch="true"');
+    attrs = attrs.replace(' data-on-hatch="true"', '');
+    if (!hatched || !label.trim()) return `<text data-chart-text-slot="${slotKey}"${attrs}>${nextInner}</text>`;
+    // Headless export: measure the final (possibly edited) label in chart units.
+    const fields = Object.fromEntries([...attrs.matchAll(/ ([\w-]+)="([^"]*)"/g)].map(m => [m[1], m[2]]));
+    const size = parseFloat(fields['font-size']) || 11;
+    const offset = value => (parseFloat(value) || 0) * (value?.endsWith('em') ? size : 1);
+    const w = textWidth(label, size, Number(fields['font-weight']) || 400);
+    const x = offset(fields.x) + offset(fields.dx) - (fields['text-anchor'] === 'middle' ? w/2 : fields['text-anchor'] === 'end' ? w : 0);
+    const y = offset(fields.y) + offset(fields.dy) - size * 0.85;
+    const inherited = ['transform', 'opacity'].filter(k => fields[k] !== undefined).map(k => ' ' + k + '="' + fields[k] + '"').join('');
+    const plate = `<rect data-label-paper="" x="${x-1.5}" y="${y-0.75}" width="${w+3}" height="${size*1.15+1.5}"${inherited} fill="#ffffff" stroke="none" pointer-events="none" aria-hidden="true"/>`;
+    const clean = attrs.replace(/ (?:fill|stroke)="[^"]*"/g, '');
+    return plate + `<text data-chart-text-slot="${slotKey}"${clean} fill="#171717" stroke="none">${nextInner}</text>`;
   });
 }
 
-function renderLegendSvg(legendItems, maxWidth, yOffset, resolvedTheme) {
-  if (!Array.isArray(legendItems) || legendItems.length === 0) return '';
+function layoutLegend(items, width) {
+  const pad = 7, gap = 10, innerWidth = width - 2 * pad;
+  let x = 0, row = 0, used = 0;
+  const cells = [];
+  items.forEach((item, idx) => {
+    const label = String(item.label ?? '');
+    if (!label) return;
+    const labelWidth = Math.ceil(textWidth(label, 11, 500));
+    const w = Math.min(innerWidth, 14 + labelWidth);
+    if (x && x + w > innerWidth) { x = 0; row++; }
+    cells.push({ idx, label, x: pad + x, y: 4 + row * 17, labelWidth: w - 14, overflow: 14 + labelWidth > innerWidth });
+    used = Math.max(used, x + w);
+    x += w + gap;
+  });
+  return { cells, width: used + 2 * pad, height: cells.length ? 22 + row * 17 : 0 };
+}
+
+function renderLegendSvg(layout, legendItems, resolvedTheme, print, originalLabels, printColors) {
+  if (!layout.height) return '';
   const tokenColorMap = {
     accent: resolvedTheme.accent,
     neutral: resolvedTheme.neutral,
@@ -317,23 +355,28 @@ function renderLegendSvg(legendItems, maxWidth, yOffset, resolvedTheme) {
     neutralSoft: resolvedTheme.neutralSoft,
     ink: resolvedTheme.ink,
   };
-  let cursorX = 0;
-  const parts = [];
-  for (let idx = 0; idx < Math.min(legendItems.length, 6); idx++) {
+  const border = print ? resolvedTheme.ink : resolvedTheme.dim;
+  const parts = [`<rect x="0.5" y="0.5" width="${layout.width-1}" height="${layout.height-1}" fill="${escapeXml(resolvedTheme.panel)}" stroke="${escapeXml(border)}"/>`];
+  for (const { idx, label, x, y, overflow, labelWidth } of layout.cells) {
     const item = legendItems[idx];
-    const label = String(item?.label ?? '');
-    if (!label) continue;
-    const itemWidth = Math.ceil(textWidth(label, 11) + 22);
-    if (cursorX > 0 && cursorX + itemWidth > maxWidth) break;
-    const rawColor = tokenColorMap[item?.color] || item?.color || resolvedTheme.accent;
-    const swatchColor = inlineZtdCssVariables(String(rawColor), resolvedTheme);
+    const color = print ? printColors[idx] : item.color;
+    const mix = /^mix:([\d.]+)$/.exec(color);
+    const rawColor = mix ? mixHex(resolvedTheme.neutralStrong, resolvedTheme.neutral, Number(mix[1]))
+      : (Object.hasOwn(resolvedTheme, color) ? resolvedTheme[color] : tokenColorMap[color] || color || resolvedTheme.accent);
+    const key = originalLabels?.[idx] ?? label;
+    const swatchColor = print?.legendFill?.(key) ?? inlineZtdCssVariables(String(rawColor), resolvedTheme);
+    const swatch = print && item.shape === 'line' && print.climate
+      ? `<circle cx="4.5" cy="6.5" r="3" fill="${escapeXml(resolvedTheme.ink)}"/>`
+      : print && item.shape === 'line'
+        ? `<line x1="0" x2="12" y1="6.5" y2="6.5" stroke="${escapeXml(swatchColor)}" stroke-width="${print.stroke}" stroke-dasharray="${print.seriesDash(key)}"/>`
+        : print && item.shape === 'circle'
+          ? `<circle cx="4.5" cy="6.5" r="4" fill="${escapeXml(swatchColor)}" stroke="${escapeXml(resolvedTheme.ink)}"/>`
+          : `<rect x="0" y="2" width="9" height="9" rx="${print ? 0 : 2.5}" fill="${escapeXml(swatchColor)}"${print ? ` stroke="${escapeXml(resolvedTheme.ink)}"` : ''}/>`;
     parts.push(
-      `<g transform="translate(${cursorX},${yOffset})">` +
-      `<rect x="0" y="2" width="9" height="9" rx="2.5" fill="${escapeXml(swatchColor)}"/>` +
-      `<text data-chart-text-slot="legend:${idx}" x="14" y="10" font-size="11" font-weight="500" fill="${escapeXml(resolvedTheme.muted)}">${escapeXml(label)}</text>` +
+      `<g transform="translate(${x},${y})">` + swatch +
+      `<text data-chart-text-slot="legend:${idx}"${overflow ? ` textLength="${labelWidth}" lengthAdjust="spacingAndGlyphs"` : ''} x="14" y="10" font-size="11" font-weight="500" fill="${escapeXml(resolvedTheme.muted)}">${escapeXml(label)}</text>` +
       `</g>`,
     );
-    cursorX += itemWidth;
   }
   return parts.join('');
 }
@@ -358,7 +401,7 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
   const resolved = resolveChartSpec(props);
   const {
     bareSpec,
-    resolvedTheme,
+    printStyle,
     localeTag,
     variant,
     title,
@@ -368,8 +411,9 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
     legendItems,
     cornerRadius,
   } = resolved;
-  const cardFill = resolved.backgroundColor === 'transparent' ? 'none' : (resolved.backgroundColor || resolvedTheme.panel);
-  const cardStroke = resolved.backgroundColor === 'transparent' ? 'none' : resolvedTheme.line;
+  const resolvedTheme = printStyle ? printTheme(printStyle, resolved.resolvedTheme) : resolved.resolvedTheme;
+  const cardFill = printStyle ? printStyle.paper : resolved.backgroundColor === 'transparent' ? 'none' : (resolved.backgroundColor || resolvedTheme.panel);
+  const cardStroke = printStyle ? 'none' : resolved.backgroundColor === 'transparent' ? 'none' : resolvedTheme.line;
 
   const padX = variant === 'card' ? 20 : 12;
   const padTop = variant === 'card' ? 18 : 12;
@@ -378,9 +422,10 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
   const hasSubtitle = variant === 'card' && Boolean(subtitle);
   const hasLegend = variant === 'card' && legendItems.length > 0;
   const hasTakeaway = variant === 'card' && Boolean(takeaway);
+  const legend = layoutLegend(hasLegend ? legendItems : [], width - 2 * padX);
 
   const headerHeight = variant === 'card'
-    ? 24 + (hasSubtitle ? 18 : 0) + (hasLegend ? 20 : 0) + 8
+    ? 24 + (hasSubtitle ? 18 : 0) + legend.height + 8
     : 0;
   const footerHeight = hasTakeaway ? 28 : 0;
 
@@ -390,11 +435,21 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
   const plotHeight = Math.max(96, height - plotY - padBottom - footerHeight);
 
   const safeId = sanitizeIdFragment(entityId);
+  const print = printStyle ? createPrintMarks(printStyle, resolved, `ztd-hatch-${Array.from(String(entityId), c => c.codePointAt(0).toString(16)).join('-')}`) : null;
+  let plotSpec = bareSpec;
+  if (print) {
+    // Explicit screen colors (notably the candlestick inspector slots) must not
+    // override the paper palette. Do not change numeric scales, domains or widths.
+    const { upColor, downColor, itemColors, theme, ...options } = bareSpec.options;
+    if (resolved.chartType === 'area') options.curve = 'linear';
+    if (resolved.chartType === 'bar') options.showLabels = false;
+    plotSpec = { ...bareSpec, options };
+  }
   const tree = React.createElement(
     ThemeProvider,
-    { theme: resolvedTheme },
+    { theme: resolvedTheme, cssVars: !print },
     React.createElement(Chart, {
-      spec: bareSpec,
+      spec: plotSpec,
       width: plotWidth,
       height: plotHeight,
       animate: false,
@@ -404,7 +459,8 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
 
   const rawHtml = renderStaticElement(tree, `ztd-${safeId}`, {
     chartType: resolved.chartType,
-    itemColors: resolved.itemColors,
+    print,
+    itemColors: print ? {} : resolved.itemColors,
     dataTargets: resolved.dataTargets,
     rows: bareSpec.data,
     encoding: bareSpec.encoding,
@@ -424,14 +480,15 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
   let headerSvg = '';
   if (variant === 'card') {
     let cursorY = padTop + 15;
-    headerSvg += `<text data-chart-field="title" x="${padX}" y="${cursorY}" font-size="15" font-weight="700" fill="${escapeXml(resolvedTheme.ink)}">${escapeXml(title)}</text>`;
+    const titlePos = print ? `x="${width/2}" text-anchor="middle"` : `x="${padX}"`;
+    headerSvg += `<text data-chart-field="title" ${titlePos} y="${cursorY}" font-size="15" font-weight="700" fill="${escapeXml(resolvedTheme.ink)}">${escapeXml(title)}</text>`;
     if (hasSubtitle) {
       cursorY += 18;
       headerSvg += `<text data-chart-field="subtitle" x="${padX}" y="${cursorY}" font-size="11.5" font-weight="400" fill="${escapeXml(resolvedTheme.muted)}">${escapeXml(subtitle)}</text>`;
     }
     if (hasLegend) {
       cursorY += 10;
-      headerSvg += `<g transform="translate(${padX},0)">${renderLegendSvg(legendItems, plotWidth, cursorY, resolvedTheme)}</g>`;
+      headerSvg += `<g data-chart-legend="true" transform="translate(${padX},${cursorY})">${renderLegendSvg(legend, legendItems, resolvedTheme, print, resolved.legendKeys, resolved.legendPrintColors)}</g>`;
     }
   }
 
@@ -445,14 +502,15 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
   }
 
   const fontFamily = escapeXml(resolvedTheme.fontFamily || 'Pretendard, -apple-system, BlinkMacSystemFont, sans-serif');
+  const radius = print ? 0 : cornerRadius;
   const svg =
     `<g transform="${transformAttr}" data-chart-type="${escapeXml(resolved.chartType)}" font-family="${fontFamily}">` +
-    `<defs><clipPath id="${clipId}"><rect width="${width}" height="${height}" rx="${cornerRadius}"/></clipPath></defs>` +
+    `<defs>${print?.pattern ?? ''}<clipPath id="${clipId}"><rect width="${width}" height="${height}" rx="${radius}"/></clipPath></defs>` +
     `<g clip-path="url(#${clipId})">` +
-    `<rect data-chart-card="background" width="${width}" height="${height}" rx="${cornerRadius}" fill="${escapeXml(cardFill)}" stroke="${escapeXml(cardStroke)}" stroke-width="1"/>` +
+    `<rect data-chart-card="background" width="${width}" height="${height}" rx="${radius}" fill="${escapeXml(cardFill)}" stroke="${escapeXml(cardStroke)}" stroke-width="1"/>` +
     headerSvg +
     `<svg x="${plotX}" y="${plotY}" width="${plotWidth}" height="${plotHeight}" viewBox="${escapeXml(viewBox)}" preserveAspectRatio="xMidYMid meet">` +
-    innerPlotSvg +
+    (print?.frame(plotHeight) ?? '') + innerPlotSvg +
     `</svg>` +
     footerSvg +
     `</g>` +
