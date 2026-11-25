@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Chart, ThemeProvider, baseCss, themeToCss } from 'ztd-charts';
 import { DEFAULT_CHART_HEIGHT, DEFAULT_CHART_WIDTH, resolveChartSpec, resolveColorForZtdKey } from './model.js';
+import { legendOffset } from './legend-drag.js';
 import { cmuFontCss } from './cmu-webfont.js';
 import { createPrintProof } from './print-proof.js';
 import { renderChartSvg } from './svg-renderer.js';
@@ -19,6 +20,9 @@ function ensureDocumentBaseCss(doc) {
       style.id = 'ztd-charts-extension-css';
       style.textContent = [
         cmuFontCss,
+        '[data-role="ztd-chart-mount"] [data-legend-kind="plot"] { translate:var(--legend-plot-x) var(--legend-plot-y); }',
+        '[data-role="ztd-chart-mount"] header ul[aria-label] { position:relative;z-index:1;translate:var(--legend-card-x) var(--legend-card-y); }',
+        '[data-legend-kind], [data-chart-legend], [data-role="ztd-chart-mount"] header ul[aria-label] { cursor:grab; touch-action:none; user-select:none; }',
         baseCss,
         '[data-role="ztd-chart-mount"] .ztd-card > header ul[aria-label] { box-sizing:border-box;max-width:100%;padding:4px 7px !important;border:1px solid var(--ztd-dim);background:var(--ztd-panel); }',
         '[data-role="ztd-chart-mount"] .ztd-card > header ul[aria-label] li { min-width:0;overflow-wrap:anywhere; }',
@@ -389,6 +393,11 @@ export function renderChartDom(hostEl, props, derived, entityId = 'chart') {
     `border:1px solid ${transparentCard ? 'transparent' : resolvedTheme.line};` +
     `color:${resolvedTheme.ink};font-family:${resolvedTheme.fontFamily};user-select:none`;
 
+  for (const kind of ['card','plot']) {
+    const {x,y} = legendOffset(props.options, kind);
+    entry.mountNode.style.setProperty('--legend-'+kind+'-x', x+'px');
+    entry.mountNode.style.setProperty('--legend-'+kind+'-y', y+'px');
+  }
   const hasSubtitle = variant === 'card' && Boolean(resolved.subtitle);
   const hasLegend = variant === 'card' && legendItems.length > 0;
   const hasTakeaway = variant === 'card' && Boolean(resolved.takeaway);

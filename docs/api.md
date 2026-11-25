@@ -19,6 +19,8 @@
 | `encoding` | `Record<string, unknown>` | `{}` | 데이터 컬럼 매핑 (`x`, `y`, `series`, `label`, `value` 등) |
 | `options` | `Record<string, unknown>` | `{}` | 차트별 세부 옵션 (`layout`, `orientation`, `curve` 등) |
 
+차트를 선택하면 각 범례 박스에 편집용 점선 선택 테두리(러버 밴드)와 오른쪽 위 이동 핸들이 표시된다. 테두리는 범례를 따라 움직이며 내보낸 SVG에는 포함되지 않는다. 이 핸들이나 범례 박스를 끌어 위치를 변경한다. `options.legendOffsets`의 `card`(카드 상단)와 `plot`(도표 내부)는 별도의 `{ x, y }` 값으로, 기본 배치에서 이동한 차트 좌표 거리다. 드래그 중 Esc는 취소하고, 놓으면 한 번의 실행 취소로 되돌릴 수 있다. SVG 내보내기에도 적용된다.
+
 ## 2. 명령 (`commands`)
 
 - `diagram.ztd-charts:insert-chart`: 새 ZTD 차트 도형 추가

@@ -7,7 +7,7 @@ const attrs = new Set(('id class viewBox preserveAspectRatio transform d points 
   'stroke-linecap stroke-linejoin stroke-miterlimit clip-path mask pathLength shape-rendering paint-order vector-effect ' +
   'text-anchor dominant-baseline alignment-baseline font-family font-size font-weight font-style letter-spacing textLength lengthAdjust ' +
   'gradientUnits gradientTransform offset stop-color stop-opacity patternUnits patternContentUnits patternTransform clipPathUnits ' +
-  'href aria-hidden data-label-paper data-chart-card data-chart-legend data-chart-legend-frame data-chart-field data-chart-type data-chart-text-slot data-ztd-key data-k data-l').split(' '));
+  'href aria-hidden data-label-paper data-legend-kind data-chart-card data-chart-legend data-chart-legend-frame data-chart-field data-chart-type data-chart-text-slot data-ztd-key data-k data-l').split(' '));
 const iriAttrs = new Set(['fill', 'stroke', 'clip-path', 'mask']);
 
 export function createPrintProof(doc, markup, width, height, title, locale) {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { legendOffset } from './legend-drag.js';
 import { createPrintMarks } from './print-marks.js';
 import { printTheme } from './print-style.js';
 import { Chart, ThemeProvider, mixHex, textWidth } from 'ztd-charts';
@@ -221,6 +222,10 @@ export function renderStaticElement(rootElement, idPrefix = 'ztd', colorContext 
           }
         }
 
+        if (rest['data-legend-kind'] === 'plot' && colorContext?.legendOffset) {
+          const {x,y} = colorContext.legendOffset;
+          if (x || y) rest.transform = 'translate('+x+','+y+')' + (rest.transform ? ' '+rest.transform : '');
+        }
         const tag = colorContext?.print?.decorate(type, rest, ownKey, parent) ?? type;
         let attrString = '';
         if (ownKey) {
@@ -460,6 +465,7 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
   const rawHtml = renderStaticElement(tree, `ztd-${safeId}`, {
     chartType: resolved.chartType,
     print,
+    legendOffset: legendOffset(props.options,'plot'),
     itemColors: print ? {} : resolved.itemColors,
     dataTargets: resolved.dataTargets,
     rows: bareSpec.data,
@@ -478,6 +484,7 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
     : `translate(${x},${y})`;
 
   let headerSvg = '';
+  let cardLegendSvg = '';
   if (variant === 'card') {
     let cursorY = padTop + 15;
     const titlePos = print ? `x="${width/2}" text-anchor="middle"` : `x="${padX}"`;
@@ -488,7 +495,8 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
     }
     if (hasLegend) {
       cursorY += 10;
-      headerSvg += `<g data-chart-legend="true" transform="translate(${padX},${cursorY})">${renderLegendSvg(legend, legendItems, resolvedTheme, print, resolved.legendKeys, resolved.legendPrintColors)}</g>`;
+      const delta = legendOffset(props.options,'card');
+      cardLegendSvg = `<g data-chart-legend="true" transform="translate(${padX+delta.x},${cursorY+delta.y})">${renderLegendSvg(legend, legendItems, resolvedTheme, print, resolved.legendKeys, resolved.legendPrintColors)}</g>`;
     }
   }
 
@@ -512,7 +520,7 @@ export function renderChartSvg(props, derived, entityId = 'chart') {
     `<svg x="${plotX}" y="${plotY}" width="${plotWidth}" height="${plotHeight}" viewBox="${escapeXml(viewBox)}" preserveAspectRatio="xMidYMid meet">` +
     (print?.frame(plotHeight) ?? '') + innerPlotSvg +
     `</svg>` +
-    footerSvg +
+    footerSvg + cardLegendSvg +
     `</g>` +
     `</g>`;
 

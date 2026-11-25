@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  ztd-charts@0.13.1: 99976e7810ddce7ab48ba8db23b9ec07112ceb651d89e640f72295af06d23e53
+  ztd-charts@0.13.1: d82006281f55c5f3955d5ba8acb86c6b02511add143f9707afb536547c409e7d
 
 importers:
 
@@ -16,7 +16,7 @@ importers:
         version: 0.1.3
       ztd-charts:
         specifier: 0.13.1
-        version: 0.13.1(patch_hash=99976e7810ddce7ab48ba8db23b9ec07112ceb651d89e640f72295af06d23e53)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        version: 0.13.1(patch_hash=d82006281f55c5f3955d5ba8acb86c6b02511add143f9707afb536547c409e7d)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
     devDependencies:
       jsdom:
         specifier: 27.4.0
@@ -870,7 +870,7 @@ snapshots:
 
   xmlchars@2.2.0: {}
 
-  ztd-charts@0.13.1(patch_hash=99976e7810ddce7ab48ba8db23b9ec07112ceb651d89e640f72295af06d23e53)(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
+  ztd-charts@0.13.1(patch_hash=d82006281f55c5f3955d5ba8acb86c6b02511add143f9707afb536547c409e7d)(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
     dependencies:
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)

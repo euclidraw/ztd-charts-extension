@@ -1,4 +1,5 @@
 import './maps.js';
+import { mountLegendDrag } from './legend-drag.js';
 import { cmuSvgDefs } from './cmu-webfont.js';
 import { PRINT_PRESETS, parsePrintCss } from './print-style.js';
 import metadata from '../extension.json' with { type: 'json' };
@@ -784,6 +785,7 @@ const plugin = {
     };
 
     try {
+      disposers.push(mountLegendDrag(context, (entityId, legendOffsets) => updateStyle({ entityId, options: { legendOffsets } })));
       disposers.push(registerZtdChartTools(context));
       for (const name of COMMAND_NAMES) {
         const off = context.commands?.register?.({
